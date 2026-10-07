@@ -1,0 +1,35 @@
+{
+  "name": "discord-mcp",
+  "version": "1.0.0",
+  "description": "MCP server that connects Claude Code (or any MCP-capable agent) sessions to a Discord channel, each under its own name.",
+  "type": "module",
+  "bin": {
+    "discord-mcp": "src/index.js"
+  },
+  "main": "src/index.js",
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "mcp",
+    "discord",
+    "claude",
+    "claude-code",
+    "agent"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/matweldon/discord-mcp.git"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "zod": "^4.6.5"
+  }
+}
