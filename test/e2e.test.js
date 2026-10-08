@@ -53,7 +53,7 @@ test("two named sessions share a channel (webhook mode)", async () => {
   const b = await connect(base, "backend", {}, stateDir);
   try {
     const tools = (await a.listTools()).tools.map((t) => t.name).sort();
-    assert.deepEqual(tools, ["check_inbox", "list_sessions", "post_message", "wait_for_message"]);
+    assert.deepEqual(tools, ["check_inbox", "list_sessions", "post_message", "set_name", "wait_for_message"]);
 
     assert.match(await call(a, "check_inbox"), /No new messages/);
     assert.match(await call(b, "check_inbox"), /No new messages/);
@@ -186,6 +186,43 @@ test("session names containing forbidden words still post via webhook", async ()
     fake.userSays("100", "@discord-mcp ping");
     const inbox = await call(a, "check_inbox");
     assert.match(inbox, /2 new messages/);
+  } finally {
+    await a.close();
+  }
+});
+
+test("set_name renames a running session", async () => {
+  const a = await connect(base, "unnamed-folder", {}, stateDir);
+  try {
+    await call(a, "check_inbox");
+    fake.userSays("100", "@donnie sent before the rename");
+    assert.match(await call(a, "set_name", { name: "Donnie" }), /now called Donnie \(was unnamed-folder\)/);
+    assert.match(await call(a, "set_name", { name: "Donnie" }), /already called Donnie/);
+    await call(a, "post_message", { content: "hi" });
+    assert.equal(fake.channels.get("100").messages.at(-1).author.username, "Donnie");
+    fake.userSays("100", "@unnamed-folder old name");
+    fake.userSays("100", "@donnie new name");
+    const inbox = await call(a, "check_inbox");
+    // Unread messages to the new name count, even if sent just before the rename.
+    assert.match(inbox, /2 new messages for Donnie/);
+    assert.match(inbox, /before the rename/);
+    assert.match(inbox, /new name/);
+    assert.doesNotMatch(inbox, /old name/);
+    await assert.rejects(call(a, "set_name", { name: "!!!" }), /not a usable name/);
+  } finally {
+    await a.close();
+  }
+});
+
+test("set_name in thread mode moves to the new name's thread", async () => {
+  const a = await connect(base, "temp", { DISCORD_MODE: "thread" }, stateDir);
+  try {
+    await call(a, "check_inbox");
+    await call(a, "set_name", { name: "mikey" });
+    const thread = [...fake.channels.values()].find((c) => c.name === "mikey");
+    assert.ok(thread, "new thread created");
+    fake.userSays(thread.id, "cowabunga");
+    assert.match(await call(a, "check_inbox"), /cowabunga/);
   } finally {
     await a.close();
   }

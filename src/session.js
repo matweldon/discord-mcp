@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { sanitizeName } from "./config.js";
 import { DiscordError, parseWebhookUrl, sleep, snowflakeCmp } from "./discord.js";
 
 // Discord rejects webhook names and usernames containing "discord" or "clyde".
@@ -19,13 +20,41 @@ export class Session {
   constructor(config, client) {
     this.config = config;
     this.client = client;
-    this.name = config.name;
-    this.nameLower = config.name.toLowerCase();
     this.postedIds = new Set();
     this.warnings = [];
-    this.statePath = path.join(config.stateDir, `${config.channelId}-${this.nameLower}.json`);
     this.state = { cursors: {} };
     this.ready = null;
+    this.applyName(config.name);
+  }
+
+  applyName(name) {
+    this.name = name;
+    this.nameLower = name.toLowerCase();
+    this.statePath = path.join(this.config.stateDir, `${this.config.channelId}-${this.nameLower}.json`);
+  }
+
+  /**
+   * Rename this session. The inbox carries on from the current read position: unread
+   * messages to the new name are delivered, older history isn't replayed.
+   */
+  async setName(raw) {
+    const name = sanitizeName(raw);
+    if (!name) throw new Error(`"${raw}" is not a usable name; use letters, digits, "-", "_" or "."`);
+    await this.init();
+    const previous = this.name;
+    if (name === previous) return { previous, name };
+    const cursors = { ...this.state.cursors };
+    this.applyName(name);
+    this.state = { cursors };
+    if (this.config.mode === "thread") {
+      delete this.state.cursors[this.threadId];
+      this.threadId = await this.resolveThread();
+    }
+    for (const ch of this.inboxChannels()) {
+      if (this.state.cursors[ch] === undefined) this.state.cursors[ch] = await this.latestMessageId(ch);
+    }
+    this.saveState();
+    return { previous, name };
   }
 
   /** Lazily initialise once; tool calls await this. */

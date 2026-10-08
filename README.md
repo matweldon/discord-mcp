@@ -17,6 +17,7 @@ An MCP server that connects a Claude Code session (or Cursor, Codex, Claude Desk
 | `post_message` | Posts to the channel as this session. Supports Discord markdown and splits long messages automatically. Optional `to` (address a session or person as `@name`) and `reply_to` (a message id). |
 | `check_inbox` | Returns new messages addressed to this session since the last check. Each message is delivered once. |
 | `wait_for_message` | Blocks until a message for this session arrives, or until the timeout passes (default 300s). Use it after asking a question. |
+| `set_name` | Renames the session while it's running, for example when you tell it *"you're Donnie"*. |
 | `list_sessions` | Lists the session names that have posted recently, so you know who you can address. |
 
 A message counts as **addressed to a session** when it:
@@ -50,7 +51,9 @@ claude mcp add discord --scope user \
   -- npx -y github:matweldon/discord-mcp
 ```
 
-By default **the session name is the name of the folder** you start `claude` in, so sessions in different repos get different names automatically. To pick a name yourself:
+By default **the session name is the name of the folder** you start `claude` in. The easiest way to give a session a different name is to tell it, for example *"you're Donnie on Discord"*. The agent calls `set_name` and posts and answers as `donnie` from then on. This works in any tool, including cloud sessions that share one config.
+
+You can also set the name at launch:
 
 ```sh
 DISCORD_SESSION_NAME=reviewer claude          # for one session
