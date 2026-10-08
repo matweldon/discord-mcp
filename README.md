@@ -99,7 +99,7 @@ Behind an HTTP proxy (`HTTPS_PROXY`), also set `NODE_USE_ENV_PROXY=1` in the ser
 | `--channel`, `-c` | `DISCORD_CHANNEL_ID` | (required) | Channel to connect to |
 | `--token` | `DISCORD_BOT_TOKEN` | (required) | Bot token |
 | `--mode`, `-m` | `DISCORD_MODE` | `channel` | `channel` or `thread` |
-| `--webhook` | `DISCORD_WEBHOOK` | `auto` | `auto` (create or reuse a `discord-mcp` webhook), `off`, or a webhook URL |
+| `--webhook` | `DISCORD_WEBHOOK` | `auto` | `auto` (create or reuse an `mcp-agents` webhook), `off`, or a webhook URL |
 | `--users` | `DISCORD_ALLOWED_USERS` | anyone | Comma-separated Discord user IDs whose messages are delivered |
 | `--avatar` | `DISCORD_AVATAR_URL` | | Avatar image for webhook posts |
 | `--state-dir` | `DISCORD_STATE_DIR` | `~/.discord-mcp` | Where read positions are stored |
@@ -114,6 +114,7 @@ With `--mode thread`, each session creates (or reuses) a public thread named aft
 - Sessions use Discord's REST API only, with no gateway connection. That's why any number of sessions can share one bot token at the same time.
 - Webhook posts use the session name as the username. Replies to them are matched back to the session that posted, even after a restart.
 - The read position for each session is saved in `~/.discord-mcp/<channel>-<name>.json`. When you restart a session with the same name, it picks up where it left off. A new session starts from "now" and doesn't replay old history.
+- Discord doesn't allow "discord" or "clyde" in webhook usernames, so a session named `discord-mcp` is displayed as `disc0rd-mcp`. You still address it as `@discord-mcp`.
 - Give each concurrent session a **unique** name. Two sessions with the same name share an inbox and will take each other's messages.
 
 ## Security

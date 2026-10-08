@@ -175,6 +175,22 @@ test("falls back to bot posts with a name prefix without Manage Webhooks", async
   }
 });
 
+test("session names containing forbidden words still post via webhook", async () => {
+  const a = await connect(base, "discord-mcp", {}, stateDir);
+  try {
+    const res = await call(a, "post_message", { content: "hi" });
+    assert.doesNotMatch(res, /Could not use a webhook/);
+    const msg = fake.channels.get("100").messages.at(-1);
+    assert.equal(msg.author.username, "disc0rd-mcp");
+    fake.userSays("100", "thanks", { message_reference: { message_id: msg.id } });
+    fake.userSays("100", "@discord-mcp ping");
+    const inbox = await call(a, "check_inbox");
+    assert.match(inbox, /2 new messages/);
+  } finally {
+    await a.close();
+  }
+});
+
 test("missing configuration is reported, not crashed on", async () => {
   const transport = new StdioClientTransport({
     command: process.execPath,

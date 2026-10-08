@@ -2,7 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { DiscordError, parseWebhookUrl, sleep, snowflakeCmp } from "./discord.js";
 
-const WEBHOOK_NAME = "discord-mcp";
+// Discord rejects webhook names and usernames containing "discord" or "clyde".
+const WEBHOOK_NAME = "mcp-agents";
 const MAX_LEN = 2000;
 const MAX_PAGES = 10;
 
@@ -63,7 +64,8 @@ export class Session {
     } catch (err) {
       if (err instanceof DiscordError && (err.status === 403 || err.status === 400)) {
         this.warnings.push(
-          "Could not use a webhook (bot lacks Manage Webhooks?) — posting as the bot with a [name] prefix instead."
+          `Could not use a webhook (${err.body?.message ?? err.message}; does the bot have Manage Webhooks in this channel?) ` +
+            "— posting as the bot with a [name] prefix instead."
         );
         return null;
       }
@@ -161,7 +163,7 @@ export class Session {
           this.webhook.token,
           {
             content: chunk,
-            username: this.name,
+            username: webhookUsername(this.name),
             avatar_url: this.config.avatarUrl,
             allowed_mentions: { parse: ["users", "roles"] },
           },
@@ -194,7 +196,7 @@ export class Session {
       return {
         name: m.author?.username ?? "webhook",
         kind: ours ? "session" : "webhook",
-        self: ours && m.author?.username?.toLowerCase() === this.nameLower,
+        self: ours && m.author?.username?.toLowerCase() === webhookUsername(this.name).toLowerCase(),
       };
     }
     if (this.me && m.author?.id === this.me.id) {
@@ -347,6 +349,11 @@ export function splitMessage(text, limit = MAX_LEN) {
   }
   if (rest.length) chunks.push(rest);
   return chunks;
+}
+
+/** The name to post under via webhook, avoiding words Discord forbids in usernames. */
+export function webhookUsername(name) {
+  return name.replace(/discord/gi, (w) => w.replace(/o/i, "0")).replace(/clyde/gi, (w) => w.replace(/e/i, "3"));
 }
 
 function escapeRegExp(s) {

@@ -24,6 +24,7 @@ export function createFakeDiscord({ manageWebhooks = true } = {}) {
       if (m) return m;
     }
   }
+  const forbidden = (name) => /discord|clyde/i.test(name);
   const userSays = (channelId, content, extra = {}) =>
     addMessage(channelId, { content, author: { id: "500", username: "alice", global_name: "Alice" }, ...extra });
 
@@ -51,6 +52,7 @@ export function createFakeDiscord({ manageWebhooks = true } = {}) {
     if ((m = /^\/channels\/(\d+)\/webhooks$/.exec(p))) {
       if (!manageWebhooks) return [403, { message: "Missing Permissions" }];
       if (req.method === "GET") return webhooks.filter((w) => w.channel_id === m[1]);
+      if (forbidden(body.name)) return [400, { message: "Invalid Form Body" }];
       const w = { id: id(), token: "tok" + nextId, name: body.name, channel_id: m[1] };
       webhooks.push(w);
       return w;
@@ -58,6 +60,7 @@ export function createFakeDiscord({ manageWebhooks = true } = {}) {
     if ((m = /^\/webhooks\/(\d+)\/(\w+)$/.exec(p))) {
       const w = webhooks.find((x) => x.id === m[1] && x.token === m[2]);
       if (!w) return [401, { message: "Invalid Webhook Token" }];
+      if (body.username && forbidden(body.username)) return [400, { message: "Invalid Form Body" }];
       const target = q.thread_id ?? w.channel_id;
       return addMessage(target, {
         content: body.content,
