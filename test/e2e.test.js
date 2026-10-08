@@ -165,9 +165,11 @@ test("unaddressed messages come back as context, and read_channel shows everythi
     assert.match(inbox, /1 other message from bots or other users/);
 
     const recent = await call(a, "read_channel", { limit: 3 });
-    assert.match(recent, /Last 3 messages \(oldest first\)/);
+    assert.match(recent, /Last 2 messages \(oldest first\)/);
     assert.ok(recent.indexOf("ok stop a minute") < recent.indexOf("your turn"));
     assert.match(recent, /— mentions you/);
+    assert.doesNotMatch(recent, /stranger says hi/); // the allowlist applies here too
+    assert.match(recent, /1 message from bots or other users not shown/);
     assert.match(await call(a, "check_inbox"), /No new messages/); // read_channel didn't touch the inbox
   } finally {
     await a.close();

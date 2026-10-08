@@ -328,17 +328,26 @@ export class Session {
     return { messages, context, skipped };
   }
 
-  /** The latest messages in the channel (or this session's thread), oldest first. Doesn't move the read cursor. */
+  /**
+   * The latest messages in the channel (or this session's thread), oldest first. Doesn't move
+   * the read cursor. Like the inbox, leaves out bots and users outside the allowlist (`hidden` counts them).
+   */
   async readChannel(limit, where = "channel") {
     await this.init();
     const ch = where === "thread" && this.threadId ? this.threadId : this.config.channelId;
     const msgs = await this.client.getMessages(ch, { limit });
     msgs.sort((a, b) => snowflakeCmp(a.id, b.id));
-    return msgs.map((m) => {
-      const sender = this.describeSender(m);
+    const messages = [];
+    let hidden = 0;
+    for (const m of msgs) {
+      if (!this.isSelf(m) && !this.isContext(m)) {
+        hidden++;
+        continue;
+      }
       const reason = this.isSelf(m) ? "you" : this.classify(m, ch) ?? "";
-      return { ...m, _reason: reason, _channel: ch, _sender: sender };
-    });
+      messages.push({ ...m, _reason: reason, _channel: ch, _sender: this.describeSender(m) });
+    }
+    return { messages, hidden };
   }
 
   /**

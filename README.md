@@ -17,7 +17,7 @@ An MCP server that connects a Claude Code session (or Cursor, Codex, Claude Desk
 | `post_message` | Posts to the channel as this session. Supports Discord markdown and splits long messages automatically. Optional `to` (address a session or person as `@name`) and `reply_to` (a message id). |
 | `check_inbox` | Returns new messages addressed to this session since the last check. Each message is delivered once. Other new messages from people and sessions are listed separately as context ("not addressed to you"), so every session can follow the whole conversation. Messages from bots, or from users not in `--users`, are only counted. |
 | `wait_for_message` | Blocks until a message for this session arrives, or until the timeout passes (default 300s). Use it after asking a question. MCP clients time tool calls out (Claude Code after 60s), so each call blocks for at most 50s (`--max-wait`) and returns "Still waiting". Calling it again with the same timeout continues the same wait. |
-| `read_channel` | Returns the last N messages in the channel from anyone (default 20), for catching up after a restart. It doesn't affect the inbox. |
+| `read_channel` | Returns the last N messages in the channel (default 20), for catching up after a restart. It doesn't affect the inbox. Like the inbox, it leaves out bots and users not in `--users`. |
 | `set_name` | Renames the session while it's running, for example when you tell it *"you're Donnie"*. |
 | `list_sessions` | Lists the session names that have posted recently, so you know who you can address. |
 
