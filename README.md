@@ -94,6 +94,48 @@ Don't commit a bot token to a repository. Put it in user-level config or an envi
 
 Behind an HTTP proxy (`HTTPS_PROXY`), also set `NODE_USE_ENV_PROXY=1` in the server's env. Node's built-in `fetch` only uses the proxy when it's set, and it needs Node 22.21 or later.
 
+### Option: let the agent install it
+
+Instead of editing config yourself, you can ask the agent to set itself up. First, put the two values in your environment once, for example in `~/.zshrc`:
+
+```sh
+export DISCORD_BOT_TOKEN=your-bot-token
+export DISCORD_CHANNEL_ID=123456789012345678
+```
+
+For cloud sessions, add them as environment variables in the cloud environment's settings instead, and allow `discord.com` in its network access.
+
+Then paste this into any agent session (Claude Code, Codex, Cursor and so on):
+
+> Install the Discord MCP server from https://github.com/matweldon/discord-mcp into your own user-level MCP configuration, not this repository. Name the server `discord`, and run it with `npx -y github:matweldon/discord-mcp`. Pass `DISCORD_BOT_TOKEN` and `DISCORD_CHANNEL_ID` to the server from my environment variables of the same name. Don't print the token or write it into any file in this repository. If you're Claude Code, use `claude mcp add --scope user` with `-e` for both variables. Also install the optional `discord-agent` plugin with `claude plugin marketplace add matweldon/discord-mcp` and `claude plugin install discord-agent@discord-mcp`. Then tell me whether I need to restart the session for the Discord tools to appear.
+
+Most tools only load MCP servers when a session starts, so expect to restart once. After that, tell each new session its name ("you're Raph").
+
+## Optional: make a session work through Discord
+
+The MCP server gives an agent the tools. To make it actually work through Discord (ask questions there, report progress, wait for instructions instead of going quiet), add the **`discord-agent` plugin** for Claude Code. It contains:
+
+- **A skill** (`plugin/skills/discord/SKILL.md`) that teaches the routine: say hello, check the inbox between steps, ask on Discord rather than in the terminal, post a summary at the end, then wait for more instructions.
+- **Two hooks** (`plugin/hooks/`):
+  - **Stop:** when the session tries to finish, it's sent back to post a summary on Discord and call `wait_for_message`. It's allowed to stop once a wait times out with no reply. This keeps the session listening for as long as you keep replying.
+  - **AskUserQuestion:** questions the session would ask in the terminal are redirected to Discord.
+
+Both hooks do nothing in a session that hasn't used a Discord tool, so the plugin is safe to leave enabled everywhere. They match any MCP server whose name contains `discord`. Set `DISCORD_HOOKS=off` to disable them for a session, and `DISCORD_IDLE_WAIT` (seconds, default `600`) to change how long the session waits before it's allowed to stop.
+
+Choose how widely to enable it:
+
+```sh
+# Just this session (from a clone of this repo)
+claude --plugin-dir /path/to/discord-mcp/plugin
+
+# Install from GitHub, for every session or for one project
+claude plugin marketplace add matweldon/discord-mcp
+claude plugin install discord-agent@discord-mcp                  # all your sessions
+claude plugin install discord-agent@discord-mcp --scope project  # this project only
+```
+
+**Other agents.** Hooks are specific to Claude Code, but the skill is plain Markdown. Copy the body of `plugin/skills/discord/SKILL.md` into the agent's instructions file (`AGENTS.md`, `.cursorrules` and so on) to get the same routine without the enforcement.
+
 ## Options
 
 | Flag | Env var | Default | |

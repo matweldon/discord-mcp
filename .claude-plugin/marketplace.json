@@ -1,0 +1,12 @@
+{
+  "name": "discord-mcp",
+  "description": "Work with Claude Code sessions from a Discord channel",
+  "owner": { "name": "matweldon" },
+  "plugins": [
+    {
+      "name": "discord-agent",
+      "source": "./plugin",
+      "description": "Skill and hooks that make a session take questions and instructions over Discord (needs the discord MCP server)"
+    }
+  ]
+}
