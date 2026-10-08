@@ -89,6 +89,8 @@ env = { DISCORD_BOT_TOKEN = "your-bot-token", DISCORD_CHANNEL_ID = "123456789012
 
 Don't commit a bot token to a repository. Put it in user-level config or an environment variable instead.
 
+Behind an HTTP proxy (`HTTPS_PROXY`), also set `NODE_USE_ENV_PROXY=1` in the server's env. Node's built-in `fetch` only uses the proxy when it's set, and it needs Node 22.21 or later.
+
 ## Options
 
 | Flag | Env var | Default | |
