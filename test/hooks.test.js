@@ -27,6 +27,14 @@ function session(calls) {
 }
 const stop = (input) => decide("stop", input, path.join(dir, "state"));
 
+test("a capped wait that is still going doesn't count as timed out", () => {
+  const input = session([
+    ["mcp__discord__post_message", "Posted"],
+    ["mcp__discord__wait_for_message", "Still waiting: no messages for leo yet (50s of 600s, 550s left)."],
+  ]);
+  assert.equal(stop(input).decision, "block");
+});
+
 test("hooks do nothing in sessions that never used Discord", () => {
   const input = session([["Bash", "ok"], ["mcp__slack__post_message", "sent"]]);
   assert.equal(stop(input), null);

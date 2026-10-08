@@ -96,8 +96,8 @@ export function decide(mode, input, stateDir = path.join(os.tmpdir(), "discord-m
       reason:
         "This session is connected to Discord. Before stopping: if you haven't reported the outcome of your " +
         "latest work there, post a short summary with post_message. Then call wait_for_message " +
-        `(timeout_seconds ${WAIT}) and act on any instructions that arrive. You can stop once a wait times out ` +
-        "with no messages.",
+        `(timeout_seconds ${WAIT}) and act on any instructions that arrive. If it returns "Still waiting", call it ` +
+        "again with the same timeout_seconds. You can stop once a wait times out with no messages.",
     };
   }
   return null;

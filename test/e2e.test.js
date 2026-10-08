@@ -101,6 +101,30 @@ test("two named sessions share a channel (webhook mode)", async () => {
   }
 });
 
+test("wait_for_message caps each call at max-wait and resumes the same wait", async () => {
+  const a = await connect(base, "capped", { DISCORD_MAX_WAIT: "1" }, stateDir);
+  try {
+    await call(a, "check_inbox");
+    const t0 = Date.now();
+    const first = await call(a, "wait_for_message", { timeout_seconds: 3 });
+    assert.match(first, /Still waiting/);
+    assert.doesNotMatch(first, /arrived within/);
+    assert.ok(Date.now() - t0 < 2500);
+    let res = first;
+    while (/Still waiting/.test(res)) res = await call(a, "wait_for_message", { timeout_seconds: 3 });
+    assert.match(res, /arrived within 3s/);
+    const total = Date.now() - t0;
+    assert.ok(total >= 2500 && total < 6000, `took ${total}ms`);
+
+    setTimeout(() => fake.userSays("100", "capped: answer after a resume"), 1500);
+    res = await call(a, "wait_for_message", { timeout_seconds: 10 });
+    while (/Still waiting/.test(res)) res = await call(a, "wait_for_message", { timeout_seconds: 10 });
+    assert.match(res, /answer after a resume/);
+  } finally {
+    await a.close();
+  }
+});
+
 test("wait_for_message returns once a message arrives", async () => {
   const a = await connect(base, "waiter", {}, stateDir);
   try {

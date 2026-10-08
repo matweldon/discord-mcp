@@ -7,6 +7,8 @@ import { DiscordError, parseWebhookUrl, sleep, snowflakeCmp } from "./discord.js
 const WEBHOOK_NAME = "mcp-agents";
 const MAX_LEN = 2000;
 const MAX_PAGES = 10;
+// How soon a capped wait_for_message must be called again to continue the same wait.
+const RESUME_GRACE_MS = 60_000;
 
 /**
  * One agent session connected to a Discord channel. Talks to Discord over REST only,
@@ -304,9 +306,18 @@ export class Session {
     return { messages, skipped };
   }
 
-  /** Poll until a message arrives or the timeout passes. */
+  /**
+   * Poll until a message arrives or the timeout passes. MCP clients time tool calls out
+   * (Claude Code after 60s), so one call blocks for at most config.maxWait seconds and
+   * returns `pending`; calling again with the same timeout soon after carries on the same wait.
+   */
   async waitForMessages(timeoutSec, onTick) {
-    const deadline = Date.now() + timeoutSec * 1000;
+    const now = Date.now();
+    const prev = this.pendingWait;
+    const resume = prev && prev.timeoutSec === timeoutSec && now - prev.returnedAt < RESUME_GRACE_MS && now < prev.deadline;
+    const deadline = resume ? prev.deadline : now + timeoutSec * 1000;
+    const callDeadline = this.config.maxWait > 0 ? Math.min(deadline, now + this.config.maxWait * 1000) : deadline;
+    this.pendingWait = null;
     let skipped = 0;
     for (;;) {
       const res = await this.checkInbox();
@@ -314,8 +325,13 @@ export class Session {
       if (res.messages.length) return { ...res, skipped };
       const left = deadline - Date.now();
       if (left <= 0) return { messages: [], skipped, timedOut: true };
+      const callLeft = callDeadline - Date.now();
+      if (callLeft <= 0) {
+        this.pendingWait = { timeoutSec, deadline, returnedAt: Date.now() };
+        return { messages: [], skipped, pending: { waited: Math.round(timeoutSec - left / 1000), left: Math.ceil(left / 1000) } };
+      }
       await onTick?.(timeoutSec - left / 1000, timeoutSec);
-      await sleep(Math.min(this.config.pollInterval * 1000, left));
+      await sleep(Math.min(this.config.pollInterval * 1000, callLeft));
     }
   }
 

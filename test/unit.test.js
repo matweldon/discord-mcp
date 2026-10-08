@@ -15,6 +15,12 @@ test("config: flags override env, name defaults to folder", () => {
   assert.equal(d.mode, "thread");
 });
 
+test("config: max wait defaults to 50s and accepts 0 for no cap", () => {
+  assert.equal(parseConfig([], env, "/a").maxWait, 50);
+  assert.equal(parseConfig(["--max-wait", "0"], env, "/a").maxWait, 0);
+  assert.equal(parseConfig([], { ...env, DISCORD_MAX_WAIT: "-1" }, "/a").errors.length, 1);
+});
+
 test("config: reports missing token/channel", () => {
   const c = parseConfig([], {}, "/a");
   assert.equal(c.errors.length, 2);

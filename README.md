@@ -16,7 +16,7 @@ An MCP server that connects a Claude Code session (or Cursor, Codex, Claude Desk
 | --- | --- |
 | `post_message` | Posts to the channel as this session. Supports Discord markdown and splits long messages automatically. Optional `to` (address a session or person as `@name`) and `reply_to` (a message id). |
 | `check_inbox` | Returns new messages addressed to this session since the last check. Each message is delivered once. |
-| `wait_for_message` | Blocks until a message for this session arrives, or until the timeout passes (default 300s). Use it after asking a question. |
+| `wait_for_message` | Blocks until a message for this session arrives, or until the timeout passes (default 300s). Use it after asking a question. MCP clients time tool calls out (Claude Code after 60s), so each call blocks for at most 50s (`--max-wait`) and returns "Still waiting". Calling it again with the same timeout continues the same wait. |
 | `set_name` | Renames the session while it's running, for example when you tell it *"you're Donnie"*. |
 | `list_sessions` | Lists the session names that have posted recently, so you know who you can address. |
 
@@ -149,6 +149,7 @@ claude plugin install discord-agent@discord-mcp --scope project  # this project 
 | `--avatar` | `DISCORD_AVATAR_URL` | | Avatar image for webhook posts |
 | `--state-dir` | `DISCORD_STATE_DIR` | `~/.discord-mcp` | Where read positions are stored |
 | `--poll-interval` | `DISCORD_POLL_INTERVAL` | `5` | Seconds between polls in `wait_for_message` |
+| `--max-wait` | `DISCORD_MAX_WAIT` | `50` | Longest one `wait_for_message` call blocks, kept under the client's tool timeout. Longer waits span several calls. `0` removes the cap. |
 
 ### Thread mode
 

@@ -19,6 +19,10 @@ You are one of possibly several agent sessions sharing a Discord channel with th
 - Post progress at real milestones only, not after every step. One or two lines is enough.
 - When a step takes a long time (a build, a test run, a deploy), say so before you start it.
 
+## Waiting
+
+`wait_for_message` returns after about 50 seconds even when you asked for longer, because MCP clients time out long tool calls. If the result says **"Still waiting"**, the wait isn't over. Call `wait_for_message` again straight away with the same `timeout_seconds`, and it carries on from where it stopped. Only a result saying no messages "arrived within" the timeout means the full wait has ended.
+
 ## Asking the user something
 
 Don't ask in the terminal; the user may not be watching it.

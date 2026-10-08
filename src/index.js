@@ -57,11 +57,16 @@ function tool(fn) {
   };
 }
 
-function formatInbox({ messages, skipped, timedOut }, header) {
+function formatInbox({ messages, skipped, timedOut, pending }, header) {
   const lines = [];
   if (messages.length) {
     lines.push(`${messages.length} new message${messages.length === 1 ? "" : "s"} for ${session.name}:`, "");
     for (const m of messages) lines.push(session.formatMessage(m), "");
+  } else if (pending) {
+    lines.push(
+      `Still waiting: no messages for ${session.name} yet (${pending.waited}s of ${header}, ${pending.left}s left). ` +
+        `This wait isn't over. Call wait_for_message again with the same timeout_seconds to keep waiting.`
+    );
   } else {
     lines.push(timedOut ? `No messages for ${session.name} arrived within ${header}.` : `No new messages for ${session.name}.`);
   }
@@ -117,7 +122,9 @@ server.registerTool(
     title: "Wait for a Discord message",
     description:
       "Block until a message addressed to this session arrives (or the timeout passes), then return it. " +
-      "Use after asking a question with post_message when you need the answer before continuing.",
+      "Use after asking a question with post_message when you need the answer before continuing. " +
+      `Each call blocks for at most ${config.maxWait || "timeout_seconds"}${config.maxWait ? "s" : ""}; ` +
+      "if it returns \"Still waiting\", call it again with the same timeout_seconds to continue the same wait.",
     inputSchema: {
       timeout_seconds: z.number().int().min(1).max(3600).default(300).describe("How long to wait (default 300)"),
     },

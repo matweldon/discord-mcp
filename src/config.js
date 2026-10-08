@@ -16,6 +16,8 @@ Options (each also settable via env var):
   --avatar         Avatar image URL for webhook posts     DISCORD_AVATAR_URL
   --state-dir      Where inbox cursors are stored         DISCORD_STATE_DIR    (default: ~/.discord-mcp)
   --poll-interval  Seconds between polls when waiting     DISCORD_POLL_INTERVAL (default: 5)
+  --max-wait       Max seconds one wait call blocks;      DISCORD_MAX_WAIT     (default: 50, 0 = no cap)
+                   longer waits span several calls
   --help, -h       Show this help
 `;
 
@@ -29,6 +31,7 @@ const FLAGS = {
   "--avatar": "avatarUrl",
   "--state-dir": "stateDir",
   "--poll-interval": "pollInterval",
+  "--max-wait": "maxWait",
 };
 
 export function parseConfig(argv = process.argv.slice(2), env = process.env, cwd = process.cwd()) {
@@ -58,6 +61,7 @@ export function parseConfig(argv = process.argv.slice(2), env = process.env, cwd
   const webhook = args.webhook ?? env.DISCORD_WEBHOOK ?? env.DISCORD_WEBHOOK_URL ?? "auto";
   const allowed = args.allowedUsers ?? env.DISCORD_ALLOWED_USERS ?? "";
   const pollInterval = Number(args.pollInterval ?? env.DISCORD_POLL_INTERVAL ?? 5);
+  const maxWait = Number(args.maxWait ?? env.DISCORD_MAX_WAIT ?? 50);
 
   const errors = [];
   if (!token) errors.push("DISCORD_BOT_TOKEN is not set");
@@ -66,6 +70,7 @@ export function parseConfig(argv = process.argv.slice(2), env = process.env, cwd
   if (!["channel", "thread"].includes(mode)) errors.push(`mode must be "channel" or "thread", got "${mode}"`);
   if (!name) errors.push("session name is empty");
   if (!(pollInterval >= 1)) errors.push("poll interval must be >= 1 second");
+  if (!(maxWait >= 0)) errors.push("max wait must be >= 0 seconds");
 
   return {
     name,
@@ -77,6 +82,7 @@ export function parseConfig(argv = process.argv.slice(2), env = process.env, cwd
     avatarUrl: args.avatarUrl ?? env.DISCORD_AVATAR_URL,
     stateDir: args.stateDir ?? env.DISCORD_STATE_DIR ?? path.join(os.homedir(), ".discord-mcp"),
     pollInterval,
+    maxWait,
     errors,
   };
 }
