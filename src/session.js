@@ -34,8 +34,9 @@ export class Session {
   }
 
   /**
-   * Rename this session. The inbox carries on from the current read position: unread
-   * messages to the new name are delivered, older history isn't replayed.
+   * Rename this session. The inbox carries on from the current read position (or the new
+   * name's saved one, if later): unread messages to the new name are delivered, older
+   * history isn't replayed.
    */
   async setName(raw) {
     const name = sanitizeName(raw);
@@ -45,7 +46,15 @@ export class Session {
     if (name === previous) return { previous, name };
     const cursors = { ...this.state.cursors };
     this.applyName(name);
-    this.state = { cursors };
+    // If this name was used before, keep whichever read position is later, so messages
+    // it already read aren't delivered again.
+    this.state = { cursors: {} };
+    this.loadState();
+    for (const [ch, id] of Object.entries(cursors)) {
+      const saved = this.state.cursors[ch];
+      if (saved === undefined || snowflakeCmp(id, saved) > 0) this.state.cursors[ch] = id;
+    }
+    delete this.state.threadId;
     if (this.config.mode === "thread") {
       delete this.state.cursors[this.threadId];
       this.threadId = await this.resolveThread();
