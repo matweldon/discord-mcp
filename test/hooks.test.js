@@ -85,8 +85,9 @@ test("ask hook redirects AskUserQuestion to Discord", () => {
 test("script reads hook input from stdin and prints JSON", () => {
   const input = session([["mcp__discord__post_message", "Posted"]]);
   const res = spawnSync(process.execPath, [HOOK, "stop"], {
-    input: JSON.stringify({ ...input, session_id: "cli-" + input.session_id }),
+    input: JSON.stringify(input),
     encoding: "utf8",
+    env: { ...process.env, DISCORD_HOOK_STATE_DIR: path.join(dir, "cli-state") },
   });
   assert.equal(res.status, 0);
   assert.equal(JSON.parse(res.stdout).decision, "block");

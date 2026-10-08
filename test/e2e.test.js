@@ -238,6 +238,29 @@ test("set_name renames a running session", async () => {
   }
 });
 
+test("set_name doesn't replay messages the name already read", async () => {
+  // This session starts first, so its read position is older than leo-again's below.
+  const other = await connect(base, "elsewhere", {}, stateDir);
+  try {
+    await call(other, "check_inbox");
+    const leo = await connect(base, "leo-again", {}, stateDir);
+    try {
+      await call(leo, "check_inbox");
+      fake.userSays("100", "@leo-again first");
+      assert.match(await call(leo, "check_inbox"), /first/);
+    } finally {
+      await leo.close();
+    }
+    fake.userSays("100", "@leo-again second");
+    await call(other, "set_name", { name: "leo-again" });
+    const inbox = await call(other, "check_inbox");
+    assert.match(inbox, /second/);
+    assert.doesNotMatch(inbox, /first/);
+  } finally {
+    await other.close();
+  }
+});
+
 test("set_name in thread mode moves to the new name's thread", async () => {
   const a = await connect(base, "temp", { DISCORD_MODE: "thread" }, stateDir);
   try {

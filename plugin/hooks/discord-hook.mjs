@@ -57,7 +57,11 @@ function resultText(content) {
   return "";
 }
 
-export function decide(mode, input, stateDir = path.join(os.tmpdir(), "discord-mcp-hooks")) {
+export function decide(
+  mode,
+  input,
+  stateDir = process.env.DISCORD_HOOK_STATE_DIR || path.join(os.tmpdir(), "discord-mcp-hooks")
+) {
   if (process.env.DISCORD_HOOKS === "off") return null;
   const calls = discordCalls(input.transcript_path);
   if (!calls.length) return null; // not a Discord session
