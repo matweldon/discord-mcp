@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "discord": {
+      "command": "npx",
+      "args": ["-y", "github:matweldon/discord-mcp"],
+      "env": {
+        "DISCORD_BOT_TOKEN": "${DISCORD_BOT_TOKEN}",
+        "DISCORD_CHANNEL_ID": "${DISCORD_CHANNEL_ID}",
+        "NODE_USE_ENV_PROXY": "1"
+      }
+    }
+  }
+}
