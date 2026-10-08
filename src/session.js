@@ -319,8 +319,10 @@ export class Session {
    * Poll until a message arrives or the timeout passes. MCP clients time tool calls out
    * (Claude Code after 60s), so one call blocks for at most config.maxWait seconds and
    * returns `pending`; calling again with the same timeout soon after carries on the same wait.
+   * Stops polling once `signal` aborts (the client cancelled or gave up), so an abandoned
+   * call doesn't mark messages as read that nobody will see.
    */
-  async waitForMessages(timeoutSec, onTick) {
+  async waitForMessages(timeoutSec, onTick, signal) {
     const now = Date.now();
     const prev = this.pendingWait;
     const resume = prev && prev.timeoutSec === timeoutSec && now - prev.returnedAt < RESUME_GRACE_MS && now < prev.deadline;
@@ -329,6 +331,7 @@ export class Session {
     this.pendingWait = null;
     let skipped = 0;
     for (;;) {
+      if (signal?.aborted) return { messages: [], skipped, cancelled: true };
       const res = await this.checkInbox();
       skipped += res.skipped;
       if (res.messages.length) return { ...res, skipped };
@@ -340,7 +343,7 @@ export class Session {
         return { messages: [], skipped, pending: { waited: Math.round(timeoutSec - left / 1000), left: Math.ceil(left / 1000) } };
       }
       await onTick?.(timeoutSec - left / 1000, timeoutSec);
-      await sleep(Math.min(this.config.pollInterval * 1000, callLeft));
+      await sleep(Math.min(this.config.pollInterval * 1000, callLeft), signal);
     }
   }
 

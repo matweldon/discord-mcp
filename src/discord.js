@@ -109,8 +109,18 @@ export class DiscordClient {
   }
 }
 
-export function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
+/** Resolves after `ms`, or as soon as `signal` aborts. */
+export function sleep(ms, signal) {
+  return new Promise((r) => {
+    if (signal?.aborted) return r();
+    const t = setTimeout(done, ms);
+    function done() {
+      clearTimeout(t);
+      signal?.removeEventListener("abort", done);
+      r();
+    }
+    signal?.addEventListener("abort", done, { once: true });
+  });
 }
 
 /** Compare Discord snowflake ids. */

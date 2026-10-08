@@ -125,6 +125,24 @@ test("wait_for_message caps each call at max-wait and resumes the same wait", as
   }
 });
 
+test("a cancelled wait_for_message stops reading the inbox", async () => {
+  const a = await connect(base, "quitter", { DISCORD_MAX_WAIT: "0" }, stateDir);
+  try {
+    await call(a, "check_inbox");
+    const ac = new AbortController();
+    const waiting = a.callTool({ name: "wait_for_message", arguments: { timeout_seconds: 30 } }, undefined, { signal: ac.signal });
+    await new Promise((r) => setTimeout(r, 500));
+    ac.abort();
+    await assert.rejects(waiting);
+    await new Promise((r) => setTimeout(r, 300));
+    fake.userSays("100", "quitter: did the abandoned wait eat this?");
+    await new Promise((r) => setTimeout(r, 2500)); // a few poll intervals
+    assert.match(await call(a, "check_inbox"), /did the abandoned wait eat this/);
+  } finally {
+    await a.close();
+  }
+});
+
 test("wait_for_message returns once a message arrives", async () => {
   const a = await connect(base, "waiter", {}, stateDir);
   try {

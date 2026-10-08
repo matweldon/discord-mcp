@@ -141,7 +141,7 @@ server.registerTool(
                 params: { progressToken, progress: Math.round(elapsed), total, message: "Waiting for Discord messages" },
               })
               .catch(() => {});
-    const res = await session.waitForMessages(timeout_seconds, onTick);
+    const res = await session.waitForMessages(timeout_seconds, onTick, extra?.signal);
     return text(formatInbox(res, `${timeout_seconds}s`));
   })
 );
