@@ -53,7 +53,7 @@ test("two named sessions share a channel (webhook mode)", async () => {
   const b = await connect(base, "backend", {}, stateDir);
   try {
     const tools = (await a.listTools()).tools.map((t) => t.name).sort();
-    assert.deepEqual(tools, ["check_inbox", "list_sessions", "post_message", "set_name", "wait_for_message"]);
+    assert.deepEqual(tools, ["check_inbox", "list_sessions", "post_message", "read_channel", "set_name", "wait_for_message"]);
 
     assert.match(await call(a, "check_inbox"), /No new messages/);
     assert.match(await call(b, "check_inbox"), /No new messages/);
@@ -70,17 +70,19 @@ test("two named sessions share a channel (webhook mode)", async () => {
     fake.userSays("100", "@all lunch time");
     fake.userSays("100", "just chatting");
 
-    const inboxA = await call(a, "check_inbox");
+    const [inboxA, contextA] = (await call(a, "check_inbox")).split("Also in the channel");
     assert.match(inboxA, /2 new messages/);
     assert.match(inboxA, /nice, ship it/);
     assert.match(inboxA, /lunch time/);
     assert.doesNotMatch(inboxA, /migrations/);
-    assert.match(inboxA, /2 other messages/);
+    assert.match(contextA, /migrations/); // the rest is shown as context
+    assert.match(contextA, /just chatting/);
 
-    const inboxB = await call(b, "check_inbox");
+    const [inboxB, contextB] = (await call(b, "check_inbox")).split("Also in the channel");
     assert.match(inboxB, /migrations/);
     assert.match(inboxB, /lunch time/);
     assert.doesNotMatch(inboxB, /ship it/);
+    assert.match(contextB, /ship it/);
 
     // Messages are delivered once.
     assert.match(await call(a, "check_inbox"), /No new messages/);
@@ -95,6 +97,80 @@ test("two named sessions share a channel (webhook mode)", async () => {
     const sessions = await call(a, "list_sessions");
     assert.match(sessions, /frontend \(you\)/);
     assert.match(sessions, /backend/);
+  } finally {
+    await a.close();
+    await b.close();
+  }
+});
+
+test("wait_for_message caps each call at max-wait and resumes the same wait", async () => {
+  const a = await connect(base, "capped", { DISCORD_MAX_WAIT: "1" }, stateDir);
+  try {
+    await call(a, "check_inbox");
+    const t0 = Date.now();
+    const first = await call(a, "wait_for_message", { timeout_seconds: 3 });
+    assert.match(first, /Still waiting/);
+    assert.doesNotMatch(first, /arrived within/);
+    assert.ok(Date.now() - t0 < 2500);
+    let res = first;
+    while (/Still waiting/.test(res)) res = await call(a, "wait_for_message", { timeout_seconds: 3 });
+    assert.match(res, /arrived within 3s/);
+    const total = Date.now() - t0;
+    assert.ok(total >= 2500 && total < 6000, `took ${total}ms`);
+
+    setTimeout(() => fake.userSays("100", "capped: answer after a resume"), 1500);
+    res = await call(a, "wait_for_message", { timeout_seconds: 10 });
+    while (/Still waiting/.test(res)) res = await call(a, "wait_for_message", { timeout_seconds: 10 });
+    assert.match(res, /answer after a resume/);
+  } finally {
+    await a.close();
+  }
+});
+
+test("a cancelled wait_for_message stops reading the inbox", async () => {
+  const a = await connect(base, "quitter", { DISCORD_MAX_WAIT: "0" }, stateDir);
+  try {
+    await call(a, "check_inbox");
+    const ac = new AbortController();
+    const waiting = a.callTool({ name: "wait_for_message", arguments: { timeout_seconds: 30 } }, undefined, { signal: ac.signal });
+    await new Promise((r) => setTimeout(r, 500));
+    ac.abort();
+    await assert.rejects(waiting);
+    await new Promise((r) => setTimeout(r, 300));
+    fake.userSays("100", "quitter: did the abandoned wait eat this?");
+    await new Promise((r) => setTimeout(r, 2500)); // a few poll intervals
+    assert.match(await call(a, "check_inbox"), /did the abandoned wait eat this/);
+  } finally {
+    await a.close();
+  }
+});
+
+test("unaddressed messages come back as context, and read_channel shows everything", async () => {
+  const a = await connect(base, "ctx", { DISCORD_ALLOWED_USERS: "u1" }, stateDir);
+  const b = await connect(base, "ctx-peer", {}, stateDir);
+  try {
+    await call(a, "check_inbox");
+    await call(b, "post_message", { content: "peer chatter for nobody" });
+    fake.userSays("100", "ok stop a minute", { author: { id: "u1", username: "sensei" } });
+    fake.userSays("100", "stranger says hi", { author: { id: "u9", username: "stranger" } });
+    fake.userSays("100", "@ctx your turn", { author: { id: "u1", username: "sensei" } });
+    const inbox = await call(a, "check_inbox");
+    const [addressed, context] = inbox.split("Also in the channel");
+    assert.match(addressed, /1 new message for ctx/);
+    assert.match(addressed, /your turn/);
+    assert.match(context, /not addressed to you/);
+    assert.match(context, /peer chatter for nobody/);
+    assert.match(context, /ok stop a minute/);
+    assert.doesNotMatch(inbox, /stranger says hi/); // not an allowed user
+    assert.match(inbox, /1 other message from bots or other users/);
+
+    const recent = await call(a, "read_channel", { limit: 3 });
+    assert.match(recent, /Last 2 messages \(oldest first\)/);
+    assert.ok(recent.indexOf("ok stop a minute") < recent.indexOf("your turn"));
+    assert.match(recent, /— mentions you/);
+    assert.doesNotMatch(recent, /stranger says hi/); // the allowlist applies here too
+    assert.match(recent, /1 message from bots or other users not shown/);
+    assert.match(await call(a, "check_inbox"), /No new messages/); // read_channel didn't touch the inbox
   } finally {
     await a.close();
     await b.close();
@@ -207,7 +283,10 @@ test("set_name renames a running session", async () => {
     assert.match(inbox, /2 new messages for Donnie/);
     assert.match(inbox, /before the rename/);
     assert.match(inbox, /new name/);
-    assert.doesNotMatch(inbox, /old name/);
+    // Messages to the old name are only context now.
+    const [addressed, context] = inbox.split("Also in the channel");
+    assert.doesNotMatch(addressed, /old name/);
+    assert.match(context, /old name/);
     await assert.rejects(call(a, "set_name", { name: "!!!" }), /not a usable name/);
   } finally {
     await a.close();

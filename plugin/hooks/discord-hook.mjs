@@ -13,7 +13,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const TOOL_RE = /^mcp__.*discord.*__(post_message|check_inbox|wait_for_message|set_name|list_sessions)$/i;
+const TOOL_RE = /^mcp__.*discord.*__(post_message|check_inbox|wait_for_message|read_channel|set_name|list_sessions)$/i;
 const WAIT = Number(process.env.DISCORD_IDLE_WAIT) || 600;
 
 /** Discord tool calls in the transcript, oldest first, with their results. */
@@ -100,8 +100,8 @@ export function decide(
       reason:
         "This session is connected to Discord. Before stopping: if you haven't reported the outcome of your " +
         "latest work there, post a short summary with post_message. Then call wait_for_message " +
-        `(timeout_seconds ${WAIT}) and act on any instructions that arrive. You can stop once a wait times out ` +
-        "with no messages.",
+        `(timeout_seconds ${WAIT}) and act on any instructions that arrive. If it returns "Still waiting", call it ` +
+        "again with the same timeout_seconds. You can stop once a wait times out with no messages.",
     };
   }
   return null;

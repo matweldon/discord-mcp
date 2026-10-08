@@ -7,6 +7,8 @@ import { DiscordError, parseWebhookUrl, sleep, snowflakeCmp } from "./discord.js
 const WEBHOOK_NAME = "mcp-agents";
 const MAX_LEN = 2000;
 const MAX_PAGES = 10;
+// How soon a capped wait_for_message must be called again to continue the same wait.
+const RESUME_GRACE_MS = 60_000;
 
 /**
  * One agent session connected to a Discord channel. Talks to Discord over REST only,
@@ -277,6 +279,14 @@ export class Session {
     return null;
   }
 
+  /** Whether an unaddressed message is shown as context: posts by people (allowed ones) and sessions. */
+  isContext(m) {
+    const sender = this.describeSender(m);
+    if (sender.self || this.postedIds.has(m.id)) return false;
+    if (sender.kind === "session") return true;
+    return sender.kind === "user" && (!this.config.allowedUsers.length || this.config.allowedUsers.includes(sender.id));
+  }
+
   async fetchNew(channelId) {
     let after = this.state.cursors[channelId] ?? "0";
     const all = [];
@@ -292,39 +302,86 @@ export class Session {
   }
 
   /**
-   * Fetch new messages addressed to this session and advance the read cursor.
-   * @returns {Promise<{messages: object[], skipped: number}>}
+   * Fetch new messages addressed to this session and advance the read cursor. Other new
+   * messages from people and sessions come back as `context`, so the session can follow
+   * the conversation without treating them as requests.
+   * @returns {Promise<{messages: object[], context: object[], skipped: number}>}
    */
   async checkInbox() {
     await this.init();
     const messages = [];
+    const context = [];
     let skipped = 0;
     for (const ch of this.inboxChannels()) {
       const fresh = await this.fetchNew(ch);
       for (const m of fresh) {
         const reason = this.classify(m, ch);
         if (reason) messages.push({ ...m, _reason: reason, _channel: ch, _sender: this.describeSender(m) });
+        else if (this.isContext(m)) context.push({ ...m, _channel: ch, _sender: this.describeSender(m) });
         else if (!this.isSelf(m)) skipped++;
       }
       if (fresh.length) this.state.cursors[ch] = fresh[fresh.length - 1].id;
     }
     this.saveState();
     messages.sort((a, b) => snowflakeCmp(a.id, b.id));
-    return { messages, skipped };
+    context.sort((a, b) => snowflakeCmp(a.id, b.id));
+    return { messages, context, skipped };
   }
 
-  /** Poll until a message arrives or the timeout passes. */
-  async waitForMessages(timeoutSec, onTick) {
-    const deadline = Date.now() + timeoutSec * 1000;
+  /**
+   * The latest messages in the channel (or this session's thread), oldest first. Doesn't move
+   * the read cursor. Like the inbox, leaves out bots and users outside the allowlist (`hidden` counts them).
+   */
+  async readChannel(limit, where = "channel") {
+    await this.init();
+    const ch = where === "thread" && this.threadId ? this.threadId : this.config.channelId;
+    const msgs = await this.client.getMessages(ch, { limit });
+    msgs.sort((a, b) => snowflakeCmp(a.id, b.id));
+    const messages = [];
+    let hidden = 0;
+    for (const m of msgs) {
+      if (!this.isSelf(m) && !this.isContext(m)) {
+        hidden++;
+        continue;
+      }
+      const reason = this.isSelf(m) ? "you" : this.classify(m, ch) ?? "";
+      messages.push({ ...m, _reason: reason, _channel: ch, _sender: this.describeSender(m) });
+    }
+    return { messages, hidden };
+  }
+
+  /**
+   * Poll until a message arrives or the timeout passes. MCP clients time tool calls out
+   * (Claude Code after 60s), so one call blocks for at most config.maxWait seconds and
+   * returns `pending`; calling again with the same timeout soon after carries on the same wait.
+   * Stops polling once `signal` aborts (the client cancelled or gave up), so an abandoned
+   * call doesn't mark messages as read that nobody will see.
+   */
+  async waitForMessages(timeoutSec, onTick, signal) {
+    const now = Date.now();
+    const prev = this.pendingWait;
+    const resume = prev && prev.timeoutSec === timeoutSec && now - prev.returnedAt < RESUME_GRACE_MS && now < prev.deadline;
+    const deadline = resume ? prev.deadline : now + timeoutSec * 1000;
+    const callDeadline = this.config.maxWait > 0 ? Math.min(deadline, now + this.config.maxWait * 1000) : deadline;
+    this.pendingWait = null;
     let skipped = 0;
+    const context = [];
     for (;;) {
+      if (signal?.aborted) return { messages: [], context, skipped, cancelled: true };
       const res = await this.checkInbox();
       skipped += res.skipped;
-      if (res.messages.length) return { ...res, skipped };
+      context.push(...res.context);
+      if (res.messages.length) return { messages: res.messages, context, skipped };
       const left = deadline - Date.now();
-      if (left <= 0) return { messages: [], skipped, timedOut: true };
+      if (left <= 0) return { messages: [], context, skipped, timedOut: true };
+      const callLeft = callDeadline - Date.now();
+      if (callLeft <= 0) {
+        this.pendingWait = { timeoutSec, deadline, returnedAt: Date.now() };
+        const pending = { waited: Math.round(timeoutSec - left / 1000), left: Math.ceil(left / 1000) };
+        return { messages: [], context, skipped, pending };
+      }
       await onTick?.(timeoutSec - left / 1000, timeoutSec);
-      await sleep(Math.min(this.config.pollInterval * 1000, left));
+      await sleep(Math.min(this.config.pollInterval * 1000, callLeft), signal);
     }
   }
 
