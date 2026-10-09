@@ -256,8 +256,8 @@ export class Session {
   }
 
   /**
-   * Only deliver messages from these senders (session names, Discord usernames, display
-   * names or user ids); everyone else is just counted. An empty list listens to everyone again.
+   * Only deliver messages from these senders (session names, Discord usernames or user ids);
+   * everyone else is just counted. An empty list listens to everyone again.
    */
   listenTo(names) {
     const list = [...new Set((names ?? []).map((n) => String(n).trim().replace(/^@/, "").toLowerCase()).filter(Boolean))];
@@ -272,16 +272,21 @@ export class Session {
     const seen = new Set([this.nameLower]);
     for (const m of msgs) {
       const s = this.describeSender(m);
-      for (const k of [s.name, s.username, s.id]) if (k) seen.add(String(k).toLowerCase());
+      for (const k of s.kind === "user" ? [s.username, s.id] : [s.name]) if (k) seen.add(String(k).toLowerCase());
     }
     return names.filter((n) => !seen.has(n));
   }
 
-  /** Whether the listen_to filter lets this sender through. Owners always get through. */
+  /**
+   * Whether the listen_to filter lets this sender through. Owners always get through. People
+   * match on username or id only: anyone can set their display name to "dana".
+   */
   isListenedTo(sender) {
     if (!this.listening) return true;
     if (sender.kind === "user" && this.config.owners.includes(sender.id)) return true;
-    const keys = [sender.name, sender.username, sender.id].filter(Boolean).map((k) => String(k).toLowerCase());
+    const keys = (sender.kind === "user" ? [sender.username, sender.id] : [sender.name])
+      .filter(Boolean)
+      .map((k) => String(k).toLowerCase());
     return keys.some((k) => this.listening.includes(k));
   }
 

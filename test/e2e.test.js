@@ -204,7 +204,13 @@ test("listen_to limits a session to chosen people and sessions", async () => {
     assert.doesNotMatch(recent, /bob|stranger/);
     assert.match(recent, /4 messages from bots, or from people and sessions you aren't listening to not shown/);
 
-    // A user id or display name works too, and [] listens to everyone again.
+    // A display name copied from someone in the filter doesn't get through.
+    fake.userSays("100", "@lis impostor", { author: { id: "u8", username: "mallory", global_name: "joe" } });
+    const spoof = await call(a, "check_inbox");
+    assert.doesNotMatch(spoof, /impostor/);
+    assert.match(spoof, /1 other message/);
+
+    // A user id works too, and [] listens to everyone again.
     await call(a, "listen_to", { names: ["u9"] });
     fake.userSays("100", "@lis id match", { author: { id: "u9", username: "stranger" } });
     assert.match(await call(a, "check_inbox"), /id match/);
@@ -231,6 +237,7 @@ test("owners are always heard, and listen_to flags names it hasn't seen", async 
     fake.userSays("100", "@own owner speaking", { author: { id: "u7", username: "boss" } });
     const inbox = await call(a, "check_inbox");
     assert.match(inbox, /owner speaking/); // not in the filter or the allowlist, but an owner
+    assert.match(inbox, /Listening only to: sensei, nobody-here, plus the owners in DISCORD_OWNER/);
   } finally {
     await a.close();
   }

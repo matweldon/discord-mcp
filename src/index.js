@@ -103,7 +103,8 @@ function hiddenFrom() {
 /** A reminder of the listen_to filter, while one is set. */
 function listeningNote() {
   if (!session.listening) return [];
-  return [`(Listening only to: ${session.listening.join(", ")}. Call listen_to with an empty list to hear everyone again.)`];
+  const owners = config.owners.length ? ", plus the owners in DISCORD_OWNER" : "";
+  return [`(Listening only to: ${session.listening.join(", ")}${owners}. Call listen_to with an empty list to hear everyone again.)`];
 }
 
 server.registerTool(
@@ -257,8 +258,8 @@ server.registerTool(
     title: "Choose who to listen to",
     description:
       "Only receive messages from these people and sessions, for example when the user says \"you're working with " +
-      "joe and dana\" or \"only listen to me, joe and dana\". Give session names, Discord usernames, display names " +
-      "or user ids. Include the person who asked unless they say otherwise. Messages from anyone else are only " +
+      "joe and dana\" or \"only listen to me, joe and dana\". Give session names, or Discord usernames or user ids " +
+      "for people (display names aren't used, since anyone can copy one). Include the person who asked unless they say otherwise. Messages from anyone else are only " +
       "counted, in the inbox, its context and read_channel. Pass an empty list to listen to everyone again. " +
       "Lasts until changed or the session restarts.",
     inputSchema: {
@@ -270,10 +271,11 @@ server.registerTool(
     if (!list) return text(`${session.name} now listens to everyone in the channel.`);
     const lines = [
       `${session.name} now listens only to: ${list.join(", ")}. Messages from anyone else are only counted. ` +
-        "Names match session names, Discord usernames, display names or user ids, ignoring case.",
+        "Names match session names, Discord usernames or user ids, ignoring case.",
     ];
     if (config.owners.length) lines.push(`The owner${config.owners.length === 1 ? "" : "s"} set in DISCORD_OWNER ${config.owners.length === 1 ? "is" : "are"} always heard too.`);
-    const unseen = await session.unseenNames(list);
+    // The filter is already set, so a failed lookup only loses the warning.
+    const unseen = await session.unseenNames(list).catch(() => []);
     if (unseen.length) {
       lines.push(
         `No one called ${unseen.map((n) => `"${n}"`).join(", ")} has posted in the last 100 messages. ` +
