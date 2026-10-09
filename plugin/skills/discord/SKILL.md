@@ -1,6 +1,6 @@
 ---
 name: discord
-description: How to work as a named agent session connected to Discord through the discord MCP server (post_message, check_inbox, wait_for_message, read_channel, set_name, listen_to, list_sessions). Use whenever those tools are available and the user mentions Discord, gives you a session name, tells you who you're working with, asks you to report back, ask questions remotely, or take instructions from a channel.
+description: How to work as a named agent session connected to Discord through the discord MCP server (post_message, check_inbox, wait_for_message, read_channel, set_name, listen_to, list_sessions, enter_thread, leave_thread). Use whenever those tools are available and the user mentions Discord, gives you a session name, tells you who you're working with, asks you to report back, ask questions remotely, or take instructions from a channel.
 ---
 
 # Working over Discord
@@ -34,6 +34,17 @@ By default you see messages from everyone in the channel. When the user tells yo
 - Call `check_inbox` between major steps, such as before starting a new part of the task or before a long command. Act on what you find before carrying on.
 - Post progress at real milestones only, not after every step. One or two lines is enough.
 - When a step takes a long time (a build, a test run, a deploy), say so before you start it.
+
+## Threads
+
+You start in the main channel. You can move into a thread under it, and back out, whenever it helps:
+
+- `enter_thread` with no name moves you into your own thread, named after you. Every message posted there comes to you, so people don't need to type `@name`. Use it for long-running or chatty work that would crowd the main channel, or when the user asks.
+- `enter_thread` with a `name` joins a shared thread (created if it doesn't exist) where several sessions work on one topic. There, as in the main channel, you only get replies to your posts, `@<your name>` and `@all`. Respond only when addressed.
+- While you're in a thread you post there, and still receive `@mentions` from the main channel. `read_channel` with `where: "thread"` reads the thread.
+- `leave_thread` takes you back to the main channel. Leave when the threaded work is done, or when the user asks. Messages posted in a thread while you're not in it aren't delivered.
+- Entering a thread posts a link to it in the main channel, so people can follow you there. You don't need to announce it yourself.
+- Your current thread is remembered, so after a restart you're back in it.
 
 ## Waiting
 

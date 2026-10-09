@@ -14,7 +14,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const TOOL_RE = /^mcp__.*discord.*__(post_message|check_inbox|wait_for_message|read_channel|set_name|list_sessions|listen_to)$/i;
+const TOOL_RE = /^mcp__.*discord.*__(post_message|check_inbox|wait_for_message|read_channel|set_name|list_sessions|listen_to|enter_thread|leave_thread)$/i;
 const WAIT = Number(process.env.DISCORD_IDLE_WAIT) || 600;
 
 /** Discord tool calls in the transcript, oldest first, with their results. */
