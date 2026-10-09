@@ -189,8 +189,13 @@ export class Session {
     await this.init();
     if (!this.threadId) return null;
     const left = { id: this.threadId, name: this.threadName };
-    // Say goodbye in the thread while it's still the post target.
-    await this.post(`**${this.name}** has left this thread and is back in the main channel.`);
+    // Say goodbye in the thread while it's still the post target. If that fails (the thread
+    // was deleted, or access lost), leave anyway, or the session could never get out.
+    try {
+      await this.post(`**${this.name}** has left this thread and is back in the main channel.`);
+    } catch (err) {
+      this.warnings.push(`Couldn't post the goodbye in the thread "${left.name}" (${err.message}); left it anyway.`);
+    }
     delete this.state.cursors[left.id];
     this.threadId = this.threadName = null;
     this.rememberThread();

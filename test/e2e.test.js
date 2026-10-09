@@ -323,6 +323,24 @@ test("enter_thread moves a session into its own thread, and a restart resumes it
   }
 });
 
+test("leave_thread works even when the thread was deleted", async () => {
+  const a = await connect(base, "orphan", {}, stateDir);
+  try {
+    await call(a, "enter_thread");
+    const [thread] = threadsNamed("orphan");
+    fake.channels.delete(thread.id);
+    assert.match(await call(a, "leave_thread"), /left the thread "orphan"[\s\S]*Couldn't post the goodbye/);
+    await call(a, "post_message", { content: "made it out" });
+    assert.equal(fake.channels.get("100").messages.at(-1).content, "made it out");
+    // Entering another thread from a deleted one works too.
+    await call(a, "enter_thread", { name: "orphan-2" });
+    fake.channels.delete(threadsNamed("orphan-2")[0].id);
+    assert.match(await call(a, "enter_thread", { name: "orphan-3" }), /now in a new thread "orphan-3"/);
+  } finally {
+    await a.close();
+  }
+});
+
 test("leave_thread returns to the main channel and stays there after a restart", async () => {
   const a = await connect(base, "leaver", {}, stateDir);
   try {

@@ -42,6 +42,7 @@ export function createFakeDiscord({ manageWebhooks = true } = {}) {
     }
     if ((m = /^\/channels\/(\d+)\/messages$/.exec(p))) {
       const ch = channels.get(m[1]);
+      if (!ch) return [404, { message: "Unknown Channel" }];
       if (req.method === "POST") return addMessage(m[1], { ...body, author: bot });
       let list = ch.messages;
       const limit = Number(q.limit ?? 50);
@@ -62,6 +63,7 @@ export function createFakeDiscord({ manageWebhooks = true } = {}) {
       if (!w) return [401, { message: "Invalid Webhook Token" }];
       if (body.username && forbidden(body.username)) return [400, { message: "Invalid Form Body" }];
       const target = q.thread_id ?? w.channel_id;
+      if (!channels.has(target)) return [404, { message: "Unknown Channel" }];
       return addMessage(target, {
         content: body.content,
         webhook_id: w.id,
