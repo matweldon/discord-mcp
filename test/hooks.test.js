@@ -95,3 +95,15 @@ test("script reads hook input from stdin and prints JSON", () => {
   assert.equal(quiet.status, 0);
   assert.equal(quiet.stdout, "");
 });
+
+test("this repo's settings run the hooks from the plugin folder", () => {
+  const root = path.join(path.dirname(HOOK), "..", "..");
+  const settings = JSON.parse(fs.readFileSync(path.join(root, ".claude", "settings.json"), "utf8"));
+  const commands = [...settings.hooks.Stop, ...settings.hooks.PreToolUse].flatMap((h) => h.hooks.map((x) => x.command));
+  assert.deepEqual(
+    commands.map((c) => c.replace("$CLAUDE_PROJECT_DIR", root)),
+    [`node "${root}/plugin/hooks/discord-hook.mjs" stop`, `node "${root}/plugin/hooks/discord-hook.mjs" ask`]
+  );
+  assert.equal(settings.hooks.PreToolUse[0].matcher, "AskUserQuestion");
+  assert.ok(fs.existsSync(HOOK));
+});

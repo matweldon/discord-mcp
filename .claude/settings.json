@@ -1,3 +1,20 @@
 {
-  "enabledMcpjsonServers": ["discord"]
+  "enabledMcpjsonServers": ["discord"],
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/plugin/hooks/discord-hook.mjs\" stop", "timeout": 30 }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          { "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/plugin/hooks/discord-hook.mjs\" ask", "timeout": 30 }
+        ]
+      }
+    ]
+  }
 }

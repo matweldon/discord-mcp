@@ -126,6 +126,8 @@ The MCP server gives an agent the tools. To make it actually work through Discor
 
 Both hooks do nothing in a session that hasn't used a Discord tool, so the plugin is safe to leave enabled everywhere. They match any MCP server whose name contains `discord`. Set `DISCORD_HOOKS=off` to disable them for a session, and `DISCORD_IDLE_WAIT` (seconds, default `600`) to change how long the session waits before it's allowed to stop.
 
+This repository's own `.claude/settings.json` already turns the two hooks on, so sessions working on discord-mcp itself get them without installing anything. If you've also installed the plugin, each hook runs twice; that's harmless, but you can leave the plugin out for this project.
+
 Choose how widely to enable it:
 
 ```sh
