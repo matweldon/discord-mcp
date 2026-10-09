@@ -53,7 +53,7 @@ test("two named sessions share a channel (webhook mode)", async () => {
   const b = await connect(base, "backend", {}, stateDir);
   try {
     const tools = (await a.listTools()).tools.map((t) => t.name).sort();
-    assert.deepEqual(tools, ["check_inbox", "list_sessions", "post_message", "read_channel", "set_name", "wait_for_message"]);
+    assert.deepEqual(tools, ["check_inbox", "list_sessions", "listen_to", "post_message", "read_channel", "set_name", "wait_for_message"]);
 
     assert.match(await call(a, "check_inbox"), /No new messages/);
     assert.match(await call(b, "check_inbox"), /No new messages/);
@@ -174,6 +174,72 @@ test("unaddressed messages come back as context, and read_channel shows everythi
   } finally {
     await a.close();
     await b.close();
+  }
+});
+
+test("listen_to limits a session to chosen people and sessions", async () => {
+  const a = await connect(base, "lis", {}, stateDir);
+  const joe = await connect(base, "joe", {}, stateDir);
+  const bob = await connect(base, "bob", {}, stateDir);
+  try {
+    await call(a, "check_inbox");
+    assert.match(await call(a, "listen_to", { names: ["@Joe", "sensei"] }), /listens only to: joe, sensei/);
+    await call(joe, "post_message", { content: "joe here", to: "lis" });
+    await call(bob, "post_message", { content: "bob here", to: "lis" });
+    await call(bob, "post_message", { content: "bob chatter" });
+    fake.userSays("100", "@lis from sensei", { author: { id: "u1", username: "sensei", global_name: "Sensei" } });
+    fake.userSays("100", "@lis from stranger", { author: { id: "u9", username: "stranger" } });
+    fake.userSays("100", "@all stranger broadcast", { author: { id: "u9", username: "stranger" } });
+
+    const inbox = await call(a, "check_inbox");
+    assert.match(inbox, /2 new messages for lis/);
+    assert.match(inbox, /joe here/);
+    assert.match(inbox, /from sensei/);
+    assert.doesNotMatch(inbox, /bob here|bob chatter|stranger/);
+    assert.match(inbox, /4 other messages from bots, or from people and sessions you aren't listening to, were not shown/);
+    assert.match(inbox, /Listening only to: joe, sensei/);
+
+    const recent = await call(a, "read_channel", { limit: 6 });
+    assert.match(recent, /joe here/);
+    assert.doesNotMatch(recent, /bob|stranger/);
+    assert.match(recent, /4 messages from bots, or from people and sessions you aren't listening to not shown/);
+
+    // A display name copied from someone in the filter doesn't get through.
+    fake.userSays("100", "@lis impostor", { author: { id: "u8", username: "mallory", global_name: "joe" } });
+    const spoof = await call(a, "check_inbox");
+    assert.doesNotMatch(spoof, /impostor/);
+    assert.match(spoof, /1 other message/);
+
+    // A user id works too, and [] listens to everyone again.
+    await call(a, "listen_to", { names: ["u9"] });
+    fake.userSays("100", "@lis id match", { author: { id: "u9", username: "stranger" } });
+    assert.match(await call(a, "check_inbox"), /id match/);
+    assert.match(await call(a, "listen_to", { names: [] }), /listens to everyone/);
+    await call(bob, "post_message", { content: "bob again", to: "lis" });
+    const all = await call(a, "check_inbox");
+    assert.match(all, /bob again/);
+    assert.doesNotMatch(all, /Listening only/);
+  } finally {
+    await a.close();
+    await joe.close();
+    await bob.close();
+  }
+});
+
+test("owners are always heard, and listen_to flags names it hasn't seen", async () => {
+  const a = await connect(base, "own", { DISCORD_OWNER: "u7", DISCORD_ALLOWED_USERS: "u1" }, stateDir);
+  try {
+    await call(a, "check_inbox");
+    const set = await call(a, "listen_to", { names: ["sensei", "nobody-here"] });
+    assert.match(set, /always heard too/);
+    assert.match(set, /No one called "nobody-here" has posted/);
+    assert.doesNotMatch(set, /"sensei"/); // posted earlier in this channel
+    fake.userSays("100", "@own owner speaking", { author: { id: "u7", username: "boss" } });
+    const inbox = await call(a, "check_inbox");
+    assert.match(inbox, /owner speaking/); // not in the filter or the allowlist, but an owner
+    assert.match(inbox, /Listening only to: sensei, nobody-here, plus the owners in DISCORD_OWNER/);
+  } finally {
+    await a.close();
   }
 });
 

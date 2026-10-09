@@ -3,7 +3,8 @@
 //
 //   discord-hook.mjs stop  (Stop)        Don't stop until the session has reported on Discord
 //                                         and waited for instructions with nothing arriving.
-//   discord-hook.mjs ask   (PreToolUse)  Send AskUserQuestion to Discord instead of the terminal.
+//   discord-hook.mjs ask   (PreToolUse)  Ask AskUserQuestion's question on Discord, and in the
+//                                         terminal as plain text, instead of a blocking prompt.
 //
 // Both do nothing in sessions that haven't used a discord tool, so they're safe to enable
 // everywhere. Set DISCORD_HOOKS=off to disable them, and DISCORD_IDLE_WAIT to change the
@@ -13,7 +14,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const TOOL_RE = /^mcp__.*discord.*__(post_message|check_inbox|wait_for_message|read_channel|set_name|list_sessions)$/i;
+const TOOL_RE = /^mcp__.*discord.*__(post_message|check_inbox|wait_for_message|read_channel|set_name|list_sessions|listen_to)$/i;
 const WAIT = Number(process.env.DISCORD_IDLE_WAIT) || 600;
 
 /** Discord tool calls in the transcript, oldest first, with their results. */
@@ -72,9 +73,11 @@ export function decide(
         hookEventName: "PreToolUse",
         permissionDecision: "deny",
         permissionDecisionReason:
-          "This session takes questions over Discord, not the terminal. Post the question with the discord " +
-          "post_message tool (numbered options, and the default you'll take if there's no answer), then call " +
-          `wait_for_message with timeout_seconds ${WAIT}.`,
+          "This session takes questions over Discord, since the user may be away from the terminal. Post the " +
+          "question with the discord post_message tool (numbered options, and the default you'll take if there's " +
+          "no answer), and also write it in the terminal as plain text. If there's other useful work that doesn't " +
+          "depend on the answer, carry on with it and call check_inbox between steps. Otherwise write one terminal " +
+          `line saying you're waiting on Discord, then call wait_for_message with timeout_seconds ${WAIT}.`,
       },
     };
   }
@@ -99,7 +102,9 @@ export function decide(
       decision: "block",
       reason:
         "This session is connected to Discord. Before stopping: if you haven't reported the outcome of your " +
-        "latest work there, post a short summary with post_message. Then call wait_for_message " +
+        "latest work there, post a short summary with post_message. Then write one line in the terminal saying " +
+        "you're waiting on Discord for follow-up (and for how long), so anyone at the computer can see you're " +
+        "idle, not working. Then call wait_for_message " +
         `(timeout_seconds ${WAIT}) and act on any instructions that arrive. If it returns "Still waiting", call it ` +
         "again with the same timeout_seconds. You can stop once a wait times out with no messages.",
     };

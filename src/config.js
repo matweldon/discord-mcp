@@ -13,6 +13,8 @@ Options (each also settable via env var):
   --webhook        "auto", "off", or a webhook URL        DISCORD_WEBHOOK      (default: auto)
   --users          Comma-separated user IDs allowed       DISCORD_ALLOWED_USERS (default: anyone)
                    to message this session
+  --owner          Comma-separated user IDs always        DISCORD_OWNER
+                   heard, even past --users and listen_to
   --avatar         Avatar image URL for webhook posts     DISCORD_AVATAR_URL
   --state-dir      Where inbox cursors are stored         DISCORD_STATE_DIR    (default: ~/.discord-mcp)
   --poll-interval  Seconds between polls when waiting     DISCORD_POLL_INTERVAL (default: 5)
@@ -28,6 +30,7 @@ const FLAGS = {
   "--token": "token",
   "--webhook": "webhook",
   "--users": "allowedUsers",
+  "--owner": "owners",
   "--avatar": "avatarUrl",
   "--state-dir": "stateDir",
   "--poll-interval": "pollInterval",
@@ -60,6 +63,10 @@ export function parseConfig(argv = process.argv.slice(2), env = process.env, cwd
   const mode = (args.mode ?? env.DISCORD_MODE ?? "channel").toLowerCase();
   const webhook = args.webhook ?? env.DISCORD_WEBHOOK ?? env.DISCORD_WEBHOOK_URL ?? "auto";
   const allowed = args.allowedUsers ?? env.DISCORD_ALLOWED_USERS ?? "";
+  const owners = splitList(args.owners ?? env.DISCORD_OWNER ?? "");
+  // Owners are always allowed, so an allowlist never shuts them out.
+  let allowedUsers = splitList(allowed);
+  if (allowedUsers.length) allowedUsers = [...new Set([...allowedUsers, ...owners])];
   const pollInterval = Number(args.pollInterval ?? env.DISCORD_POLL_INTERVAL ?? 5);
   const maxWait = Number(args.maxWait ?? env.DISCORD_MAX_WAIT ?? 50);
 
@@ -78,13 +85,18 @@ export function parseConfig(argv = process.argv.slice(2), env = process.env, cwd
     channelId,
     mode,
     webhook,
-    allowedUsers: allowed.split(",").map((s) => s.trim()).filter(Boolean),
+    allowedUsers,
+    owners,
     avatarUrl: args.avatarUrl ?? env.DISCORD_AVATAR_URL,
     stateDir: args.stateDir ?? env.DISCORD_STATE_DIR ?? path.join(os.homedir(), ".discord-mcp"),
     pollInterval,
     maxWait,
     errors,
   };
+}
+
+function splitList(s) {
+  return s.split(",").map((x) => x.trim()).filter(Boolean);
 }
 
 /** Names are used for addressing (@name), so keep them to a simple token. */
