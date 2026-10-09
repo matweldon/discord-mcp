@@ -7,6 +7,11 @@ import { DiscordError, parseWebhookUrl, sleep, snowflakeCmp } from "./discord.js
 const WEBHOOK_NAME = "mcp-agents";
 const MAX_LEN = 2000;
 const MAX_PAGES = 10;
+// Discord's limit on channel (and so thread) names.
+const MAX_THREAD_NAME = 100;
+// list_sessions scans at most this many of the channel's active threads, this many messages each.
+const MAX_SCANNED_THREADS = 20;
+const THREAD_SCAN_LIMIT = 50;
 // How soon a capped wait_for_message must be called again to continue the same wait.
 const RESUME_GRACE_MS = 60_000;
 
@@ -28,6 +33,9 @@ export class Session {
     this.ready = null;
     // Names (lowercased) this session listens to, set with listenTo(); null means everyone.
     this.listening = null;
+    // The thread this session is in (set with enterThread), or null for the main channel.
+    this.threadId = null;
+    this.threadName = null;
     this.applyName(config.name);
   }
 
@@ -48,6 +56,7 @@ export class Session {
     await this.init();
     const previous = this.name;
     if (name === previous) return { previous, name };
+    const inOwnThread = this.isOwnThread();
     const cursors = { ...this.state.cursors };
     this.applyName(name);
     // If this name was used before, keep whichever read position is later, so messages
@@ -58,11 +67,10 @@ export class Session {
       const saved = this.state.cursors[ch];
       if (saved === undefined || snowflakeCmp(id, saved) > 0) this.state.cursors[ch] = id;
     }
-    delete this.state.threadId;
-    if (this.config.mode === "thread") {
-      delete this.state.cursors[this.threadId];
-      this.threadId = await this.resolveThread();
-    }
+    // Stay in the current thread, not the one the new name's saved state was in.
+    this.rememberThread();
+    // A thread named after the session moves with it; a shared thread doesn't.
+    if (inOwnThread) await this.enterThread(name);
     for (const ch of this.inboxChannels()) {
       if (this.state.cursors[ch] === undefined) this.state.cursors[ch] = await this.latestMessageId(ch);
     }
@@ -85,7 +93,7 @@ export class Session {
     this.channel = await this.client.getChannel(this.config.channelId);
     this.guildId = this.channel.guild_id ?? "@me";
     this.webhook = await this.resolveWebhook();
-    if (this.config.mode === "thread") this.threadId = await this.resolveThread();
+    await this.restoreThread();
     for (const ch of this.inboxChannels()) {
       if (this.state.cursors[ch] === undefined) this.state.cursors[ch] = await this.latestMessageId(ch);
     }
@@ -115,33 +123,98 @@ export class Session {
     }
   }
 
-  async resolveThread() {
-    const parent = this.config.channelId;
-    if (this.state.threadId) {
-      try {
-        const t = await this.client.getChannel(this.state.threadId);
-        if (t.parent_id === parent) return t.id;
-      } catch (err) {
-        if (!(err instanceof DiscordError) || err.status >= 500) throw err;
+  /** Go back into the thread saved in the state file, if it still exists under the channel. */
+  async restoreThread() {
+    const id = this.state.threadId;
+    if (!id) return;
+    try {
+      const t = await this.client.getChannel(id);
+      if (t.parent_id === this.config.channelId) {
+        this.threadId = t.id;
+        this.threadName = t.name;
+        this.rememberThread();
+        return;
       }
+    } catch (err) {
+      if (!(err instanceof DiscordError) || err.status >= 500) throw err;
     }
-    const matches = (t) => t.parent_id === parent && t.name.toLowerCase() === this.nameLower;
-    let thread = null;
-    if (this.channel.guild_id) {
-      const active = await this.client.getActiveThreads(this.channel.guild_id);
-      thread = (active.threads ?? []).find(matches);
-    }
+    // Gone, or no longer under this channel: back to the main channel.
+    delete this.state.cursors[id];
+    this.threadId = this.threadName = null;
+    this.rememberThread();
+  }
+
+  /** Find a thread under the channel by name (active first, then archived), or create it. */
+  async findOrCreateThread(name) {
+    const parent = this.config.channelId;
+    const lower = name.toLowerCase();
+    const matches = (t) => t.parent_id === parent && t.name.toLowerCase() === lower;
+    const active = await this.client.getActiveThreads(this.channel.guild_id);
+    let thread = (active.threads ?? []).find(matches);
     if (!thread) {
       const archived = await this.client.getArchivedPublicThreads(parent).catch(() => ({ threads: [] }));
       thread = (archived.threads ?? []).find(matches);
     }
-    if (!thread) {
-      thread = await this.client.createThread(parent, this.name);
-      this.threadId = thread.id;
-      await this.post(`Session **${this.name}** connected. Messages in this thread go to this session.`);
+    if (thread) return { thread, created: false };
+    return { thread: await this.client.createThread(parent, name), created: true };
+  }
+
+  /**
+   * Move this session into a thread under the channel, by default one named after it. The
+   * thread is found or created; reading starts from its latest message. Entering another
+   * thread leaves the current one first.
+   */
+  async enterThread(raw) {
+    await this.init();
+    const name = threadName(raw ?? this.name);
+    if (!name) throw new Error(`"${raw}" is not a usable thread name`);
+    if (!this.channel.guild_id) throw new Error("Threads aren't available here: the channel isn't in a server.");
+    if (this.threadId && this.threadName?.toLowerCase() === name.toLowerCase()) {
+      return { thread: { id: this.threadId, name: this.threadName }, already: true };
     }
-    this.state.threadId = thread.id;
-    return thread.id;
+    const left = await this.leaveThread();
+    const { thread, created } = await this.findOrCreateThread(name);
+    // Announce in the main channel before switching, since post() targets the current thread.
+    await this.post(`**${this.name}** is now working in the thread ${this.channelLink(thread.id)}.`);
+    this.threadId = thread.id;
+    this.threadName = thread.name;
+    this.state.cursors[thread.id] = await this.latestMessageId(thread.id);
+    this.rememberThread();
+    this.saveState();
+    return { thread, created, left };
+  }
+
+  /** Go back to the main channel. Returns the thread left, or null if not in one. */
+  async leaveThread() {
+    await this.init();
+    if (!this.threadId) return null;
+    const left = { id: this.threadId, name: this.threadName };
+    // Say goodbye in the thread while it's still the post target. If that fails (the thread
+    // was deleted, or access lost), leave anyway, or the session could never get out.
+    try {
+      await this.post(`**${this.name}** has left this thread and is back in the main channel.`);
+    } catch (err) {
+      this.warnings.push(`Couldn't post the goodbye in the thread "${left.name}" (${err.message}); left it anyway.`);
+    }
+    delete this.state.cursors[left.id];
+    this.threadId = this.threadName = null;
+    this.rememberThread();
+    this.saveState();
+    return left;
+  }
+
+  /** Whether the current thread is this session's own, named after it. */
+  isOwnThread() {
+    return !!this.threadId && this.threadName?.toLowerCase() === this.nameLower;
+  }
+
+  /** Copy the current thread into the state to be saved. */
+  rememberThread() {
+    if (this.threadId) Object.assign(this.state, { threadId: this.threadId, threadName: this.threadName });
+    else {
+      delete this.state.threadId;
+      delete this.state.threadName;
+    }
   }
 
   async latestMessageId(channelId) {
@@ -229,6 +302,10 @@ export class Session {
     return `https://discord.com/channels/${this.guildId}/${channelId}/${messageId}`;
   }
 
+  channelLink(channelId) {
+    return `https://discord.com/channels/${this.guildId}/${channelId}`;
+  }
+
   // ---------- reading ----------
 
   /** Who sent a message, and whether it was this session. */
@@ -309,7 +386,8 @@ export class Session {
     }
     if (sender.kind === "bot" || sender.kind === "webhook") return null;
     if (!this.isListenedTo(sender)) return null;
-    if (this.threadId && channelId === this.threadId) return "in your thread";
+    // Everything in the session's own thread is for it; a shared thread works like the channel.
+    if (this.isOwnThread() && channelId === this.threadId) return "in your thread";
     const refId = m.message_reference?.message_id;
     if (refId && (this.postedIds.has(refId) || this.isSelf(m.referenced_message))) return "reply to you";
     if (this.mentionsMe(m.content)) return /@all\b/i.test(m.content) ? "@all" : "mentions you";
@@ -368,13 +446,16 @@ export class Session {
   }
 
   /**
-   * The latest messages in the channel (or this session's thread), oldest first. Doesn't move
+   * The latest messages in the channel (or the thread this session is in), oldest first. Doesn't move
    * the read cursor. Like the inbox, leaves out bots, users outside the allowlist and senders
    * outside the listen_to filter (`hidden` counts them).
    */
   async readChannel(limit, where = "channel") {
     await this.init();
-    const ch = where === "thread" && this.threadId ? this.threadId : this.config.channelId;
+    if (where === "thread" && !this.threadId) {
+      throw new Error('Not in a thread. Call enter_thread first, or use where "channel".');
+    }
+    const ch = where === "thread" ? this.threadId : this.config.channelId;
     const msgs = await this.client.getMessages(ch, { limit });
     msgs.sort((a, b) => snowflakeCmp(a.id, b.id));
     const messages = [];
@@ -425,12 +506,11 @@ export class Session {
     }
   }
 
-  /** Session names seen recently in the channel (and its threads, in thread mode). */
+  /** Session names seen recently in the channel and its active threads. */
   async listSessions() {
     await this.init();
     const seen = new Map();
-    const scan = async (channelId, threadName) => {
-      const msgs = await this.client.getMessages(channelId, { limit: 100 });
+    const merge = (msgs, threadName) => {
       for (const m of msgs) {
         const s = this.describeSender(m);
         if (s.kind !== "session") continue;
@@ -441,10 +521,19 @@ export class Session {
         } else if (threadName && !prev.thread) prev.thread = threadName;
       }
     };
-    await scan(this.config.channelId);
-    if (this.config.mode === "thread" && this.channel.guild_id) {
+    merge(await this.client.getMessages(this.config.channelId, { limit: 100 }));
+    if (this.channel.guild_id) {
       const active = await this.client.getActiveThreads(this.channel.guild_id);
-      for (const t of active.threads ?? []) if (t.parent_id === this.config.channelId) await scan(t.id, t.name);
+      // The newest threads (ids are snowflakes, so they sort by creation time), fetched in
+      // parallel but merged in order so the result doesn't depend on timing.
+      const threads = (active.threads ?? [])
+        .filter((t) => t.parent_id === this.config.channelId)
+        .sort((a, b) => snowflakeCmp(b.id, a.id))
+        .slice(0, MAX_SCANNED_THREADS);
+      const pages = await Promise.all(
+        threads.map((t) => this.client.getMessages(t.id, { limit: THREAD_SCAN_LIMIT }).catch(() => []))
+      );
+      threads.forEach((t, i) => merge(pages[i], t.name));
     }
     if (!seen.has(this.nameLower)) seen.set(this.nameLower, { name: this.name, lastSeen: null });
     return [...seen.values()].sort((a, b) => String(b.lastSeen ?? "").localeCompare(String(a.lastSeen ?? "")));
@@ -470,6 +559,15 @@ export class Session {
     }
     return lines.join("\n");
   }
+}
+
+/** A usable thread name: trimmed, single-spaced, without control characters, within Discord's limit. */
+export function threadName(raw) {
+  return String(raw ?? "")
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, MAX_THREAD_NAME);
 }
 
 export function splitMessage(text, limit = MAX_LEN) {

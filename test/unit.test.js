@@ -10,9 +10,15 @@ test("config: flags override env, name defaults to folder", () => {
   const c = parseConfig([], env, "/work/My Project");
   assert.equal(c.name, "My-Project");
   assert.deepEqual(c.errors, []);
-  const d = parseConfig(["--name", "backend", "--mode=thread"], { ...env, DISCORD_SESSION_NAME: "x" });
+  const d = parseConfig(["--name", "backend"], { ...env, DISCORD_SESSION_NAME: "x" });
   assert.equal(d.name, "backend");
-  assert.equal(d.mode, "thread");
+});
+
+test("config: --mode is gone, DISCORD_MODE is ignored", () => {
+  assert.throws(() => parseConfig(["--mode", "thread"], env), /Unknown argument: --mode/);
+  const c = parseConfig([], { ...env, DISCORD_MODE: "thread" }, "/a");
+  assert.deepEqual(c.errors, []);
+  assert.equal("mode" in c, false);
 });
 
 test("config: max wait defaults to 50s and accepts 0 for no cap", () => {

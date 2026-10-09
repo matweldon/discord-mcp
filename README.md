@@ -14,20 +14,22 @@ An MCP server that connects a Claude Code session (or Cursor, Codex, Claude Desk
 
 | Tool | What it does |
 | --- | --- |
-| `post_message` | Posts to the channel as this session. Supports Discord markdown and splits long messages automatically. Optional `to` (address a session or person as `@name`) and `reply_to` (a message id). |
+| `post_message` | Posts to the channel (or the thread the session is in) as this session. Supports Discord markdown and splits long messages automatically. Optional `to` (address a session or person as `@name`) and `reply_to` (a message id). |
 | `check_inbox` | Returns new messages addressed to this session since the last check. Each message is delivered once. Other new messages from people and sessions are listed separately as context ("not addressed to you"), so every session can follow the whole conversation. Messages from bots, or from users not in `--users`, are only counted. |
 | `wait_for_message` | Blocks until a message for this session arrives, or until the timeout passes (default 300s). Use it after asking a question. MCP clients time tool calls out (Claude Code after 60s), so each call blocks for at most 50s (`--max-wait`) and returns "Still waiting". Calling it again with the same timeout continues the same wait. |
-| `read_channel` | Returns the last N messages in the channel (default 20), for catching up after a restart. It doesn't affect the inbox. Like the inbox, it leaves out bots and users not in `--users`. |
+| `read_channel` | Returns the last N messages in the channel (default 20), or in the current thread with `where: "thread"`, for catching up after a restart. It doesn't affect the inbox. Like the inbox, it leaves out bots and users not in `--users`. |
 | `set_name` | Renames the session while it's running, for example when you tell it *"you're Donnie"*. |
 | `listen_to` | Limits the session to messages from the people and sessions you name, for example when you tell it *"you're working with joe and dana"*. Names can be session names, or Discord usernames or user ids for people. Display names aren't matched, since anyone can set theirs to copy someone else's. Messages from anyone else, addressed or not, appear only as a count, in the inbox and in `read_channel`. An empty list hears everyone again. It lasts until changed or the session restarts. Owners (`DISCORD_OWNER`) are always heard. |
-| `list_sessions` | Lists the session names that have posted recently, so you know who you can address. |
+| `list_sessions` | Lists the session names that have posted recently in the channel and its active threads, so you know who you can address. |
+| `enter_thread` | Moves the session into a thread under the channel, creating it if needed. With no `name` it's the session's own thread; with a `name` it's a shared thread. See [Threads](#threads). |
+| `leave_thread` | Takes the session back to the main channel. |
 
 A message counts as **addressed to a session** when it:
 
 - replies to one of that session's posts (Discord's *Reply* button),
 - contains `@<name>`, or starts with `<name>:`. Plain text is fine here; it doesn't need to be a real Discord mention,
 - contains `@all` or `@everyone`, or
-- is posted in the session's own thread (thread mode only, see below).
+- is posted in the session's own thread, once it has called `enter_thread` (see [Threads](#threads)).
 
 ## Setup
 
@@ -145,7 +147,6 @@ claude plugin install discord-agent@discord-mcp --scope project  # this project 
 | `--name`, `-n` | `DISCORD_SESSION_NAME` | folder name | Session name, used for display and `@addressing` |
 | `--channel`, `-c` | `DISCORD_CHANNEL_ID` | (required) | Channel to connect to |
 | `--token` | `DISCORD_BOT_TOKEN` | (required) | Bot token |
-| `--mode`, `-m` | `DISCORD_MODE` | `channel` | `channel` or `thread` |
 | `--webhook` | `DISCORD_WEBHOOK` | `auto` | `auto` (create or reuse an `mcp-agents` webhook), `off`, or a webhook URL |
 | `--users` | `DISCORD_ALLOWED_USERS` | anyone | Comma-separated Discord user IDs whose messages are delivered |
 | `--owner` | `DISCORD_OWNER` | | Comma-separated Discord user IDs that are always heard, even past `--users` and `listen_to` |
@@ -154,9 +155,20 @@ claude plugin install discord-agent@discord-mcp --scope project  # this project 
 | `--poll-interval` | `DISCORD_POLL_INTERVAL` | `5` | Seconds between polls in `wait_for_message` |
 | `--max-wait` | `DISCORD_MAX_WAIT` | `50` | Longest one `wait_for_message` call blocks, kept under the client's tool timeout. Longer waits span several calls. `0` removes the cap. |
 
-### Thread mode
+### Threads
 
-With `--mode thread`, each session creates (or reuses) a public thread named after itself under the channel. It posts there, and **every** message in that thread goes to its inbox, so you don't need to type `@name`. Messages in the main channel that use `@name` or `@all` are still delivered too. This keeps busy multi-session setups tidy.
+A session starts in the main channel and can move into a thread under it, and back out, while it runs. There's nothing to configure. The agent calls `enter_thread` and `leave_thread` itself, or when you ask it to ("move to your thread").
+
+- **Its own thread.** `enter_thread` with no name finds or creates a public thread named after the session. The session posts there, and **every** message in that thread goes to its inbox, so you don't need to type `@name`. Messages in the main channel that use `@name` or `@all` are still delivered too. This keeps busy multi-session setups tidy.
+- **A shared thread.** `enter_thread` with a `name` joins (or creates) a thread for a topic, so several sessions can work in it together. There, as in the main channel, a session only gets replies to its posts, `@<name>` and `@all`, so they don't all answer every message.
+- **Announcements.** Entering posts a link to the thread in the main channel, and leaving posts a line in the thread.
+- **Limits.** Only threads under the configured channel can be entered. Entering a different thread leaves the current one. Messages posted in a thread while the session is out of it aren't delivered, and a session that comes back starts from the thread's latest message.
+- **Restarts.** The current thread is saved with the read position, so a restarted session with the same name is back in the thread it was in. After `leave_thread` it comes back to the main channel.
+- **Renaming.** `set_name` moves a session in its own thread to the new name's thread. A session in a shared thread stays in it.
+
+`read_channel` takes `where: "thread"` to read the current thread, and `list_sessions` also looks at the channel's active threads.
+
+The `--mode` flag and `DISCORD_MODE` setting from earlier versions have been removed. The server now exits with an "Unknown argument" error if `--mode` is still in your config, so delete it. `DISCORD_MODE` is ignored.
 
 ## How it works
 

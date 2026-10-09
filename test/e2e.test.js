@@ -53,7 +53,9 @@ test("two named sessions share a channel (webhook mode)", async () => {
   const b = await connect(base, "backend", {}, stateDir);
   try {
     const tools = (await a.listTools()).tools.map((t) => t.name).sort();
-    assert.deepEqual(tools, ["check_inbox", "list_sessions", "listen_to", "post_message", "read_channel", "set_name", "wait_for_message"]);
+    assert.deepEqual(tools, [
+      "check_inbox", "enter_thread", "leave_thread", "list_sessions", "listen_to", "post_message", "read_channel", "set_name", "wait_for_message",
+    ]);
 
     assert.match(await call(a, "check_inbox"), /No new messages/);
     assert.match(await call(b, "check_inbox"), /No new messages/);
@@ -271,29 +273,191 @@ test("inbox cursor survives a restart", async () => {
   }
 });
 
-test("thread mode gives each session its own thread", async () => {
-  const a = await connect(base, "worker1", { DISCORD_MODE: "thread" }, stateDir);
+const threadsNamed = (name) => [...fake.channels.values()].filter((c) => c.type === 11 && c.name === name);
+
+test("enter_thread moves a session into its own thread, and a restart resumes it", async () => {
+  const a = await connect(base, "worker1", {}, stateDir);
   try {
     await call(a, "check_inbox");
-    const thread = [...fake.channels.values()].find((c) => c.name === "worker1");
+    // Before entering, posts go to the main channel and thread messages aren't seen.
+    await call(a, "post_message", { content: "status: before" });
+    assert.equal(fake.channels.get("100").messages.at(-1).content, "status: before");
+
+    const res = await call(a, "enter_thread");
+    assert.match(res, /now in a new thread "worker1"/);
+    const [thread] = threadsNamed("worker1");
     assert.ok(thread, "thread created");
+    // The main channel gets a link; the thread gets no "connected" line.
+    const announced = fake.channels.get("100").messages.at(-1).content;
+    assert.match(announced, /worker1\*\* is now working in the thread/);
+    assert.ok(announced.includes(`/${thread.id}`), "links to the thread");
+    assert.equal(thread.messages.length, 0);
+
     await call(a, "post_message", { content: "status: started" });
     assert.equal(thread.messages.at(-1).content, "status: started");
     fake.userSays(thread.id, "no mention needed here");
     fake.userSays("100", "@worker1 from the main channel");
     const inbox = await call(a, "check_inbox");
     assert.match(inbox, /no mention needed here/);
+    assert.match(inbox, /in your thread/);
     assert.match(inbox, /from the main channel/);
+
+    // Entering the thread you're in does nothing.
+    const before = thread.messages.length;
+    assert.match(await call(a, "enter_thread"), /already in the thread "worker1"/);
+    assert.equal(thread.messages.length, before);
   } finally {
     await a.close();
   }
-  // Reconnecting reuses the same thread.
-  const again = await connect(base, "worker1", { DISCORD_MODE: "thread" }, stateDir);
+  // Restarting with the same name goes back into the same thread, without a new one.
+  const [thread] = threadsNamed("worker1");
+  fake.userSays(thread.id, "sent while restarting");
+  const again = await connect(base, "worker1", {}, stateDir);
   try {
-    await call(again, "check_inbox");
-    assert.equal([...fake.channels.values()].filter((c) => c.name === "worker1").length, 1);
+    assert.match(await call(again, "check_inbox"), /sent while restarting/);
+    await call(again, "post_message", { content: "back" });
+    assert.equal(thread.messages.at(-1).content, "back");
+    assert.equal(threadsNamed("worker1").length, 1);
   } finally {
     await again.close();
+  }
+});
+
+test("leave_thread works even when the thread was deleted", async () => {
+  const a = await connect(base, "orphan", {}, stateDir);
+  try {
+    await call(a, "enter_thread");
+    const [thread] = threadsNamed("orphan");
+    fake.channels.delete(thread.id);
+    assert.match(await call(a, "leave_thread"), /left the thread "orphan"[\s\S]*Couldn't post the goodbye/);
+    await call(a, "post_message", { content: "made it out" });
+    assert.equal(fake.channels.get("100").messages.at(-1).content, "made it out");
+    // Entering another thread from a deleted one works too.
+    await call(a, "enter_thread", { name: "orphan-2" });
+    fake.channels.delete(threadsNamed("orphan-2")[0].id);
+    assert.match(await call(a, "enter_thread", { name: "orphan-3" }), /now in a new thread "orphan-3"/);
+  } finally {
+    await a.close();
+  }
+});
+
+test("leave_thread returns to the main channel and stays there after a restart", async () => {
+  const a = await connect(base, "leaver", {}, stateDir);
+  try {
+    assert.match(await call(a, "leave_thread"), /isn't in a thread/);
+    await call(a, "enter_thread");
+    const [thread] = threadsNamed("leaver");
+    assert.match(await call(a, "leave_thread"), /left the thread "leaver"/);
+    assert.match(thread.messages.at(-1).content, /has left this thread/);
+
+    await call(a, "post_message", { content: "main again" });
+    assert.equal(fake.channels.get("100").messages.at(-1).content, "main again");
+    // Messages in the thread are no longer delivered, but @mentions in the channel still are.
+    fake.userSays(thread.id, "anyone in here?");
+    fake.userSays("100", "@leaver hello");
+    const inbox = await call(a, "check_inbox");
+    assert.match(inbox, /1 new message for leaver/);
+    assert.match(inbox, /hello/);
+    assert.doesNotMatch(inbox, /anyone in here/);
+  } finally {
+    await a.close();
+  }
+  const again = await connect(base, "leaver", {}, stateDir);
+  try {
+    await call(again, "post_message", { content: "still main" });
+    assert.equal(fake.channels.get("100").messages.at(-1).content, "still main");
+    // Entering again starts from the latest message, not the history from while it was away.
+    fake.userSays(threadsNamed("leaver")[0].id, "old news");
+    await call(again, "enter_thread");
+    assert.match(await call(again, "check_inbox"), /No new messages/);
+    assert.equal(threadsNamed("leaver").length, 1);
+  } finally {
+    await again.close();
+  }
+});
+
+test("a shared thread only delivers messages addressed to the session", async () => {
+  const a = await connect(base, "sharer1", {}, stateDir);
+  const b = await connect(base, "sharer2", {}, stateDir);
+  try {
+    await call(a, "enter_thread", { name: "Release Prep" });
+    // Names match case-insensitively, so the second session joins the same thread.
+    assert.match(await call(b, "enter_thread", { name: "release prep" }), /now in the thread "Release Prep"/);
+    const threads = threadsNamed("Release Prep");
+    assert.equal(threads.length, 1);
+    const links = fake.channels.get("100").messages.filter((m) => /sharer[12]\*\* is now working in the thread/.test(m.content));
+    assert.equal(links.length, 2);
+    assert.ok(links.every((m) => m.content.includes(`/${threads[0].id}`)));
+    const [thread] = threads;
+
+    const posted = await call(a, "post_message", { content: "who has the changelog?" });
+    assert.equal(thread.messages.at(-1).content, "who has the changelog?");
+    fake.userSays(thread.id, "thinking out loud");
+    fake.userSays(thread.id, "@sharer2 you take it");
+    fake.userSays(thread.id, "thanks", { message_reference: { message_id: /id (\d+)/.exec(posted)[1] } });
+
+    const forB = await call(b, "check_inbox");
+    assert.match(forB, /1 new message for sharer2/);
+    assert.match(forB, /you take it/);
+    assert.doesNotMatch(forB.split("Also in the channel")[0], /thinking out loud/);
+    // The unaddressed message is still shown as context.
+    assert.match(forB, /thinking out loud/);
+
+    const forA = await call(a, "check_inbox");
+    assert.match(forA, /1 new message for sharer1/);
+    assert.match(forA, /reply to you/);
+    assert.doesNotMatch(forA.split("Also in the channel")[0], /you take it/);
+  } finally {
+    await a.close();
+    await b.close();
+  }
+});
+
+test("entering another thread leaves the first one", async () => {
+  const a = await connect(base, "hopper", {}, stateDir);
+  try {
+    await call(a, "enter_thread", { name: "topic-a" });
+    const res = await call(a, "enter_thread", { name: "topic-b" });
+    assert.match(res, /Left the thread "topic-a"/);
+    assert.match(res, /now in a new thread "topic-b"/);
+    assert.match(threadsNamed("topic-a")[0].messages.at(-1).content, /has left this thread/);
+    await call(a, "post_message", { content: "in b" });
+    assert.equal(threadsNamed("topic-b")[0].messages.at(-1).content, "in b");
+    fake.userSays(threadsNamed("topic-a")[0].id, "@hopper still there?");
+    // Not in topic-a any more, so a mention there isn't seen.
+    assert.match(await call(a, "check_inbox"), /No new messages/);
+  } finally {
+    await a.close();
+  }
+});
+
+test("read_channel where=thread needs a thread", async () => {
+  const a = await connect(base, "reader", {}, stateDir);
+  try {
+    await assert.rejects(call(a, "read_channel", { where: "thread" }), /Not in a thread/);
+    await call(a, "enter_thread");
+    const [thread] = threadsNamed("reader");
+    fake.userSays(thread.id, "thread chatter");
+    assert.match(await call(a, "read_channel", { where: "thread" }), /thread chatter/);
+    assert.doesNotMatch(await call(a, "read_channel"), /thread chatter/);
+    await call(a, "leave_thread");
+    await assert.rejects(call(a, "read_channel", { where: "thread" }), /Not in a thread/);
+  } finally {
+    await a.close();
+  }
+});
+
+test("list_sessions includes sessions in active threads", async () => {
+  const a = await connect(base, "lister", {}, stateDir);
+  const b = await connect(base, "threaded", {}, stateDir);
+  try {
+    await call(b, "enter_thread");
+    await call(b, "post_message", { content: "working here" });
+    const list = await call(a, "list_sessions");
+    assert.match(list, /threaded.*thread "threaded"/);
+  } finally {
+    await a.close();
+    await b.close();
   }
 });
 
@@ -382,15 +546,51 @@ test("set_name doesn't replay messages the name already read", async () => {
   }
 });
 
-test("set_name in thread mode moves to the new name's thread", async () => {
-  const a = await connect(base, "temp", { DISCORD_MODE: "thread" }, stateDir);
+test("set_name moves a session in its own thread to the new name's thread", async () => {
+  const a = await connect(base, "temp", {}, stateDir);
   try {
-    await call(a, "check_inbox");
+    await call(a, "enter_thread");
     await call(a, "set_name", { name: "mikey" });
-    const thread = [...fake.channels.values()].find((c) => c.name === "mikey");
+    const thread = threadsNamed("mikey")[0];
     assert.ok(thread, "new thread created");
+    await call(a, "post_message", { content: "renamed" });
+    assert.equal(thread.messages.at(-1).content, "renamed");
     fake.userSays(thread.id, "cowabunga");
     assert.match(await call(a, "check_inbox"), /cowabunga/);
+  } finally {
+    await a.close();
+  }
+});
+
+test("set_name leaves a shared thread alone, and a rename in the main channel stays there", async () => {
+  const a = await connect(base, "shy", {}, stateDir);
+  try {
+    await call(a, "enter_thread", { name: "crew" });
+    await call(a, "set_name", { name: "bold" });
+    assert.equal(threadsNamed("bold").length, 0);
+    await call(a, "post_message", { content: "still in crew" });
+    assert.equal(threadsNamed("crew")[0].messages.at(-1).content, "still in crew");
+    // It's a shared thread, so only a mention gets through under the new name.
+    fake.userSays(threadsNamed("crew")[0].id, "unaddressed");
+    fake.userSays(threadsNamed("crew")[0].id, "@bold you there");
+    assert.match(await call(a, "check_inbox"), /1 new message for bold/);
+
+    await call(a, "leave_thread");
+    await call(a, "set_name", { name: "plain" });
+    assert.equal(threadsNamed("plain").length, 0);
+    await call(a, "post_message", { content: "in the channel" });
+    assert.equal(fake.channels.get("100").messages.at(-1).content, "in the channel");
+  } finally {
+    await a.close();
+  }
+});
+
+test("a leftover DISCORD_MODE setting is ignored", async () => {
+  const a = await connect(base, "oldconfig", { DISCORD_MODE: "thread" }, stateDir);
+  try {
+    await call(a, "post_message", { content: "channel as usual" });
+    assert.equal(fake.channels.get("100").messages.at(-1).content, "channel as usual");
+    assert.equal(threadsNamed("oldconfig").length, 0);
   } finally {
     await a.close();
   }

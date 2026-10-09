@@ -3,12 +3,11 @@ import path from "node:path";
 
 const HELP = `discord-mcp — connect an agent session to a Discord channel over MCP.
 
-Usage: discord-mcp [--name <session-name>] [--channel <id>] [--mode channel|thread]
+Usage: discord-mcp [--name <session-name>] [--channel <id>]
 
 Options (each also settable via env var):
   --name, -n       Session name shown in Discord          DISCORD_SESSION_NAME (default: current folder name)
   --channel, -c    Channel ID to connect to               DISCORD_CHANNEL_ID   (required)
-  --mode, -m       "channel" or "thread"                  DISCORD_MODE         (default: channel)
   --token          Bot token (prefer the env var)         DISCORD_BOT_TOKEN    (required)
   --webhook        "auto", "off", or a webhook URL        DISCORD_WEBHOOK      (default: auto)
   --users          Comma-separated user IDs allowed       DISCORD_ALLOWED_USERS (default: anyone)
@@ -26,7 +25,6 @@ Options (each also settable via env var):
 const FLAGS = {
   "--name": "name", "-n": "name",
   "--channel": "channelId", "-c": "channelId",
-  "--mode": "mode", "-m": "mode",
   "--token": "token",
   "--webhook": "webhook",
   "--users": "allowedUsers",
@@ -60,7 +58,6 @@ export function parseConfig(argv = process.argv.slice(2), env = process.env, cwd
   const name = sanitizeName(args.name ?? env.DISCORD_SESSION_NAME ?? path.basename(cwd));
   const token = args.token ?? env.DISCORD_BOT_TOKEN ?? env.DISCORD_TOKEN;
   const channelId = args.channelId ?? env.DISCORD_CHANNEL_ID;
-  const mode = (args.mode ?? env.DISCORD_MODE ?? "channel").toLowerCase();
   const webhook = args.webhook ?? env.DISCORD_WEBHOOK ?? env.DISCORD_WEBHOOK_URL ?? "auto";
   const allowed = args.allowedUsers ?? env.DISCORD_ALLOWED_USERS ?? "";
   const owners = splitList(args.owners ?? env.DISCORD_OWNER ?? "");
@@ -74,7 +71,6 @@ export function parseConfig(argv = process.argv.slice(2), env = process.env, cwd
   if (!token) errors.push("DISCORD_BOT_TOKEN is not set");
   if (!channelId) errors.push("DISCORD_CHANNEL_ID is not set");
   else if (!/^\d+$/.test(channelId)) errors.push(`DISCORD_CHANNEL_ID must be a numeric id, got "${channelId}"`);
-  if (!["channel", "thread"].includes(mode)) errors.push(`mode must be "channel" or "thread", got "${mode}"`);
   if (!name) errors.push("session name is empty");
   if (!(pollInterval >= 1)) errors.push("poll interval must be >= 1 second");
   if (!(maxWait >= 0)) errors.push("max wait must be >= 0 seconds");
@@ -83,7 +79,6 @@ export function parseConfig(argv = process.argv.slice(2), env = process.env, cwd
     name,
     token,
     channelId,
-    mode,
     webhook,
     allowedUsers,
     owners,
