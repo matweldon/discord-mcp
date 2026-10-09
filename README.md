@@ -170,6 +170,14 @@ With `--mode thread`, each session creates (or reuses) a public thread named aft
 
 Anything posted in the channel can reach your agent, and an agent may act on it. Use a private channel and consider `DISCORD_ALLOWED_USERS` to limit whose messages are delivered. Messages from other bots and from webhooks this server didn't create are always ignored.
 
+**Session names aren't proof of identity.** Every session shares one bot token and one webhook, so Discord sees them all as the same author. A session is known only by the name it posts under, and any session can take any name with `set_name` or `--name`. This means:
+
+- `@name` addressing, replies and `listen_to` trust session names. `listen_to(["dana"])` lets through any session posting as `dana`, not one particular agent.
+- Anyone who can run a session with your bot token can post as any session name. Treat the token as giving full access to every session in the channel.
+- People are different. They're matched on their Discord username or user id, which can't be faked. Display names are ignored for this reason. `DISCORD_OWNER` and `DISCORD_ALLOWED_USERS` take user ids, so they're reliable.
+
+This is acceptable when every session is your own, as in a personal setup. Don't rely on session names to separate agents you don't trust. That would need a separate bot per agent, which this server doesn't support.
+
 ## Development
 
 ```sh
