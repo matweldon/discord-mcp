@@ -48,6 +48,20 @@ after(async () => {
   fs.rmSync(stateDir, { recursive: true, force: true });
 });
 
+test("instructions and results remind the session to keep listening on Discord", async () => {
+  const a = await connect(base, "reminded", {}, stateDir);
+  try {
+    assert.match(a.getInstructions(), /ask questions on Discord/);
+    assert.match(a.getInstructions(), /Don't end your turn until a wait times out/);
+    assert.match(await call(a, "post_message", { content: "any thoughts?" }), /then call wait_for_message/);
+    fake.userSays("100", "@reminded yes");
+    assert.match(await call(a, "check_inbox"), /report back with post_message, then call wait_for_message/);
+    assert.match(await call(a, "wait_for_message", { timeout_seconds: 1 }), /arrived within 1s\. If your work is done, you can stop now/);
+  } finally {
+    await a.close();
+  }
+});
+
 test("two named sessions share a channel (webhook mode)", async () => {
   const a = await connect(base, "frontend", {}, stateDir);
   const b = await connect(base, "backend", {}, stateDir);
