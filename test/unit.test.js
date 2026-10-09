@@ -27,6 +27,13 @@ test("config: reports missing token/channel", () => {
   assert.throws(() => parseConfig(["--bogus"], env));
 });
 
+test("config: owners join a set allowlist but don't create one", () => {
+  const c = parseConfig(["--owner", "7, 8"], { ...env, DISCORD_ALLOWED_USERS: "1" }, "/a");
+  assert.deepEqual(c.owners, ["7", "8"]);
+  assert.deepEqual(c.allowedUsers, ["1", "7", "8"]);
+  assert.deepEqual(parseConfig([], { ...env, DISCORD_OWNER: "7" }, "/a").allowedUsers, []);
+});
+
 test("sanitizeName strips odd characters", () => {
   assert.equal(sanitizeName("  my agent!! "), "my-agent");
 });

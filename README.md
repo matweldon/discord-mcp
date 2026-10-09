@@ -19,6 +19,7 @@ An MCP server that connects a Claude Code session (or Cursor, Codex, Claude Desk
 | `wait_for_message` | Blocks until a message for this session arrives, or until the timeout passes (default 300s). Use it after asking a question. MCP clients time tool calls out (Claude Code after 60s), so each call blocks for at most 50s (`--max-wait`) and returns "Still waiting". Calling it again with the same timeout continues the same wait. |
 | `read_channel` | Returns the last N messages in the channel (default 20), for catching up after a restart. It doesn't affect the inbox. Like the inbox, it leaves out bots and users not in `--users`. |
 | `set_name` | Renames the session while it's running, for example when you tell it *"you're Donnie"*. |
+| `listen_to` | Limits the session to messages from the people and sessions you name, for example when you tell it *"you're working with joe and dana"*. Names can be session names, Discord usernames, display names or user ids. Messages from anyone else, addressed or not, appear only as a count, in the inbox and in `read_channel`. An empty list hears everyone again. It lasts until changed or the session restarts. Owners (`DISCORD_OWNER`) are always heard. |
 | `list_sessions` | Lists the session names that have posted recently, so you know who you can address. |
 
 A message counts as **addressed to a session** when it:
@@ -116,10 +117,10 @@ Most tools only load MCP servers when a session starts, so expect to restart onc
 
 The MCP server gives an agent the tools. To make it actually work through Discord (ask questions there, report progress, wait for instructions instead of going quiet), add the **`discord-agent` plugin** for Claude Code. It contains:
 
-- **A skill** (`plugin/skills/discord/SKILL.md`) that teaches the routine: say hello, check the inbox between steps, ask on Discord rather than in the terminal, post a summary at the end, then wait for more instructions.
+- **A skill** (`plugin/skills/discord/SKILL.md`) that teaches the routine: say hello, check the inbox between steps, ask questions on Discord (and repeat them in the terminal), keep working on anything that doesn't depend on the answer, post a summary at the end, then wait for more instructions. Before every wait it writes a line in the terminal, such as *"Waiting on Discord for MatW23's reply (up to 10 min)"*, so a session that's waiting doesn't look busy when you come back to your computer.
 - **Two hooks** (`plugin/hooks/`):
-  - **Stop:** when the session tries to finish, it's sent back to post a summary on Discord and call `wait_for_message`. It's allowed to stop once a wait times out with no reply. This keeps the session listening for as long as you keep replying.
-  - **AskUserQuestion:** questions the session would ask in the terminal are redirected to Discord.
+  - **Stop:** when the session tries to finish, it's sent back to post a summary on Discord, say in the terminal that it's waiting, and call `wait_for_message`. It's allowed to stop once a wait times out with no reply. This keeps the session listening for as long as you keep replying.
+  - **AskUserQuestion:** questions the session would ask with a blocking terminal prompt go to Discord instead, and are repeated as plain text in the terminal.
 
 Both hooks do nothing in a session that hasn't used a Discord tool, so the plugin is safe to leave enabled everywhere. They match any MCP server whose name contains `discord`. Set `DISCORD_HOOKS=off` to disable them for a session, and `DISCORD_IDLE_WAIT` (seconds, default `600`) to change how long the session waits before it's allowed to stop.
 
@@ -147,6 +148,7 @@ claude plugin install discord-agent@discord-mcp --scope project  # this project 
 | `--mode`, `-m` | `DISCORD_MODE` | `channel` | `channel` or `thread` |
 | `--webhook` | `DISCORD_WEBHOOK` | `auto` | `auto` (create or reuse an `mcp-agents` webhook), `off`, or a webhook URL |
 | `--users` | `DISCORD_ALLOWED_USERS` | anyone | Comma-separated Discord user IDs whose messages are delivered |
+| `--owner` | `DISCORD_OWNER` | | Comma-separated Discord user IDs that are always heard, even past `--users` and `listen_to` |
 | `--avatar` | `DISCORD_AVATAR_URL` | | Avatar image for webhook posts |
 | `--state-dir` | `DISCORD_STATE_DIR` | `~/.discord-mcp` | Where read positions are stored |
 | `--poll-interval` | `DISCORD_POLL_INTERVAL` | `5` | Seconds between polls in `wait_for_message` |

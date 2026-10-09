@@ -26,6 +26,8 @@ export class Session {
     this.warnings = [];
     this.state = { cursors: {} };
     this.ready = null;
+    // Names (lowercased) this session listens to, set with listenTo(); null means everyone.
+    this.listening = null;
     this.applyName(config.name);
   }
 
@@ -253,6 +255,36 @@ export class Session {
     };
   }
 
+  /**
+   * Only deliver messages from these senders (session names, Discord usernames, display
+   * names or user ids); everyone else is just counted. An empty list listens to everyone again.
+   */
+  listenTo(names) {
+    const list = [...new Set((names ?? []).map((n) => String(n).trim().replace(/^@/, "").toLowerCase()).filter(Boolean))];
+    this.listening = list.length ? list : null;
+    return this.listening;
+  }
+
+  /** Of the listen_to names, those that match no sender among the channel's recent messages. */
+  async unseenNames(names) {
+    await this.init();
+    const msgs = await this.client.getMessages(this.threadId ?? this.config.channelId, { limit: 100 });
+    const seen = new Set([this.nameLower]);
+    for (const m of msgs) {
+      const s = this.describeSender(m);
+      for (const k of [s.name, s.username, s.id]) if (k) seen.add(String(k).toLowerCase());
+    }
+    return names.filter((n) => !seen.has(n));
+  }
+
+  /** Whether the listen_to filter lets this sender through. Owners always get through. */
+  isListenedTo(sender) {
+    if (!this.listening) return true;
+    if (sender.kind === "user" && this.config.owners.includes(sender.id)) return true;
+    const keys = [sender.name, sender.username, sender.id].filter(Boolean).map((k) => String(k).toLowerCase());
+    return keys.some((k) => this.listening.includes(k));
+  }
+
   isSelf(m) {
     return !!m && (this.postedIds.has(m.id) || this.describeSender(m).self);
   }
@@ -271,6 +303,7 @@ export class Session {
       return null;
     }
     if (sender.kind === "bot" || sender.kind === "webhook") return null;
+    if (!this.isListenedTo(sender)) return null;
     if (this.threadId && channelId === this.threadId) return "in your thread";
     const refId = m.message_reference?.message_id;
     if (refId && (this.postedIds.has(refId) || this.isSelf(m.referenced_message))) return "reply to you";
@@ -283,6 +316,7 @@ export class Session {
   isContext(m) {
     const sender = this.describeSender(m);
     if (sender.self || this.postedIds.has(m.id)) return false;
+    if (!this.isListenedTo(sender)) return false;
     if (sender.kind === "session") return true;
     return sender.kind === "user" && (!this.config.allowedUsers.length || this.config.allowedUsers.includes(sender.id));
   }
@@ -330,7 +364,8 @@ export class Session {
 
   /**
    * The latest messages in the channel (or this session's thread), oldest first. Doesn't move
-   * the read cursor. Like the inbox, leaves out bots and users outside the allowlist (`hidden` counts them).
+   * the read cursor. Like the inbox, leaves out bots, users outside the allowlist and senders
+   * outside the listen_to filter (`hidden` counts them).
    */
   async readChannel(limit, where = "channel") {
     await this.init();
